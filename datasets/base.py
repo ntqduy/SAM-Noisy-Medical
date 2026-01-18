@@ -15,4 +15,4 @@ class BaseDatasetAdapter(ABC):
             gt_mask: uint8 HxW {0,1},
             meta: dict }
         """
-        ...
+        pass

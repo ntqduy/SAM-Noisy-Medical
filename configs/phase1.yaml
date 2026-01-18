@@ -12,7 +12,8 @@ phase: 1
 datasets:
   - name: "montgomery"
     adapter: "ImageMaskFolderAdapter"
-    root: "/content/Montgomery/Montgomery"
+    # root: "/content/Montgomery/Montgomery"
+    root: "./data/montgomery"
     image_dir: "img"
     mask_dir: "mask"
     image_exts: [".png", ".jpg", ".jpeg"]
@@ -20,15 +21,15 @@ datasets:
     mask:
       type: "binary_0_255"  # or "multiclass"
       class_id: 1           # dùng khi multiclass
-  - name: "jsrt_like"
-    adapter: "ImageMaskFolderAdapter"
-    root: "/path/to/jsrt_like"
-    image_dir: "images"
-    mask_dir: "masks"
-    image_exts: [".png"]
-    mask_exts: [".png"]
-    mask:
-      type: "binary_0_255"
+  # - name: "jsrt_like"
+  #   adapter: "ImageMaskFolderAdapter"
+  #   root: "./data/jsrt_like"
+  #   image_dir: "images"
+  #   mask_dir: "masks"
+  #   image_exts: [".png"]
+  #   mask_exts: [".png"]
+  #   mask:
+  #     type: "binary_0_255"
 
 models:
   - name: "SAM"
@@ -36,10 +37,12 @@ models:
     mode: ["prompt_bbox", "automatic"]
     weights:
       - id: "sam_b"
-        checkpoint: "/content/sam_b.pt"
+        # checkpoint: "/content/sam_b.pt"
+        checkpoint: "weights/sam_vit_b_01ec64.pth"
         model_type: "vit_b"
       - id: "sam_l"
-        checkpoint: "/content/sam_l.pt"
+        # checkpoint: "/content/sam_l.pt"
+        checkpoint: "weights/sam_vit_l_0b3195.pth"
         model_type: "vit_l"
 
 inference:

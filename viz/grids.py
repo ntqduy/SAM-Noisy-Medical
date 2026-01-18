@@ -10,6 +10,7 @@ from reportlab.lib.units import cm
 from reportlab.pdfgen import canvas
 
 from viz.overlays import overlay
+from typing import Dict
 
 
 def _safe_read_gray(path: str) -> np.ndarray:

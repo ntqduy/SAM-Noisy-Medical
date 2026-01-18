@@ -1,0 +1,247 @@
+{
+  "exp": {
+    "name": "phase1_xray_controlled",
+    "out_root": "outputs"
+  },
+  "device": "cuda",
+  "seed": 42,
+  "limit_n": 0,
+  "dry_run": false,
+  "phase": 1,
+  "datasets": [
+    {
+      "name": "montgomery",
+      "adapter": "ImageMaskFolderAdapter",
+      "root": "./data/montgomery",
+      "image_dir": "img",
+      "mask_dir": "mask",
+      "image_exts": [
+        ".png",
+        ".jpg",
+        ".jpeg"
+      ],
+      "mask_exts": [
+        ".png",
+        ".jpg",
+        ".jpeg"
+      ],
+      "mask": {
+        "type": "binary_0_255",
+        "class_id": 1
+      }
+    }
+  ],
+  "models": [
+    {
+      "name": "SAM",
+      "runner": "SAM1",
+      "mode": [
+        "prompt_bbox",
+        "automatic"
+      ],
+      "weights": [
+        {
+          "id": "sam_b",
+          "checkpoint": "weights/sam_vit_b_01ec64.pth",
+          "model_type": "vit_b"
+        },
+        {
+          "id": "sam_l",
+          "checkpoint": "weights/sam_vit_l_0b3195.pth",
+          "model_type": "vit_l"
+        }
+      ]
+    }
+  ],
+  "inference": {
+    "image_rgb": "repeat_gray_3ch",
+    "prompt": {
+      "default": "BOX_FROM_GT_BBOX"
+    }
+  },
+  "noises": {
+    "phase1_required": [
+      "gaussian",
+      "poisson",
+      "salt_pepper",
+      "motion_blur",
+      "bias_field",
+      "low_contrast"
+    ],
+    "phase2_optional": [
+      "speckle",
+      "uniform",
+      "jpeg",
+      "quantization",
+      "defocus_blur",
+      "coarse_dropout",
+      "gridmask"
+    ]
+  },
+  "levels": {
+    "names": [
+      "L0",
+      "L1",
+      "L2",
+      "L3",
+      "L4"
+    ]
+  },
+  "protocols": {
+    "enabled": [
+      "P0",
+      "P1",
+      "P2"
+    ],
+    "coupled_presets": {
+      "gaussian": {
+        "L1": {
+          "p": 0.3,
+          "sigma": 5
+        },
+        "L2": {
+          "p": 0.6,
+          "sigma": 10
+        },
+        "L3": {
+          "p": 0.8,
+          "sigma": 18
+        },
+        "L4": {
+          "p": 1.0,
+          "sigma": 28
+        }
+      },
+      "poisson": {
+        "L1": {
+          "p": 0.3,
+          "lam": 8
+        },
+        "L2": {
+          "p": 0.6,
+          "lam": 15
+        },
+        "L3": {
+          "p": 0.8,
+          "lam": 25
+        },
+        "L4": {
+          "p": 1.0,
+          "lam": 40
+        }
+      },
+      "salt_pepper": {
+        "L1": {
+          "p": 0.3,
+          "amount": 0.005
+        },
+        "L2": {
+          "p": 0.6,
+          "amount": 0.01
+        },
+        "L3": {
+          "p": 0.8,
+          "amount": 0.02
+        },
+        "L4": {
+          "p": 1.0,
+          "amount": 0.04
+        }
+      },
+      "motion_blur": {
+        "L1": {
+          "p": 0.3,
+          "k": 5,
+          "angle": 10
+        },
+        "L2": {
+          "p": 0.6,
+          "k": 9,
+          "angle": 15
+        },
+        "L3": {
+          "p": 0.8,
+          "k": 13,
+          "angle": 20
+        },
+        "L4": {
+          "p": 1.0,
+          "k": 17,
+          "angle": 25
+        }
+      },
+      "bias_field": {
+        "L1": {
+          "p": 0.3,
+          "strength": 0.2,
+          "smooth": 48
+        },
+        "L2": {
+          "p": 0.6,
+          "strength": 0.35,
+          "smooth": 64
+        },
+        "L3": {
+          "p": 0.8,
+          "strength": 0.55,
+          "smooth": 96
+        },
+        "L4": {
+          "p": 1.0,
+          "strength": 0.8,
+          "smooth": 128
+        }
+      },
+      "low_contrast": {
+        "L1": {
+          "p": 0.3,
+          "alpha": 0.85,
+          "beta": 0.0
+        },
+        "L2": {
+          "p": 0.6,
+          "alpha": 0.75,
+          "beta": 0.0
+        },
+        "L3": {
+          "p": 0.8,
+          "alpha": 0.65,
+          "beta": 0.0
+        },
+        "L4": {
+          "p": 1.0,
+          "alpha": 0.5,
+          "beta": 0.0
+        }
+      }
+    },
+    "ofat": {
+      "p_fixed": 0.8,
+      "severity_ref_level": "L3"
+    },
+    "grid": {
+      "enabled": false,
+      "p_values": [
+        0.2,
+        0.5,
+        0.8
+      ],
+      "severity_levels": [
+        "L1",
+        "L2",
+        "L3"
+      ]
+    }
+  },
+  "outputs": {
+    "save_pred_masks": true,
+    "num_preview_samples": 8,
+    "preview_levels": [
+      "L0",
+      "L2",
+      "L4"
+    ],
+    "num_failure_cases": 8,
+    "figures_dpi": 160
+  }
+}

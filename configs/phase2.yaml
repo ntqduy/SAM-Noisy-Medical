@@ -20,7 +20,7 @@ datasets:
   # Dataset 1: X-ray (Montgomery CXR)
   - name: "montgomery"
     adapter: "ImageMaskFolderAdapter"
-    root: "/path/to/montgomery"
+    root: "./data/montgomery"
     image_dir: "images"
     mask_dir: "masks"
     image_exts: [".png", ".jpg"]
@@ -32,7 +32,7 @@ datasets:
   # Dataset 2: X-ray (JSRT)
   - name: "jsrt"
     adapter: "ImageMaskFolderAdapter"
-    root: "/path/to/jsrt"
+    root: "./data/jsrt"
     image_dir: "images"
     mask_dir: "masks"
     image_exts: [".png"]
@@ -44,7 +44,7 @@ datasets:
   # Dataset 3: CT Scan
   - name: "ct_liver"
     adapter: "ImageMaskFolderAdapter"
-    root: "/path/to/ct_liver_2d"
+    root: "./data/ct_liver_2d"
     image_dir: "images"
     mask_dir: "masks"
     image_exts: [".png", ".jpg"]
@@ -56,7 +56,7 @@ datasets:
   # Dataset 4: Ultrasound
   - name: "ultrasound_breast"
     adapter: "ImageMaskFolderAdapter"
-    root: "/path/to/ultrasound_breast"
+    root: "./data/ultrasound_breast"
     image_dir: "images"
     mask_dir: "masks"
     image_exts: [".png", ".jpg"]
@@ -68,7 +68,7 @@ datasets:
   # Dataset 5: Dermoscopy
   - name: "dermoscopy"
     adapter: "ImageMaskFolderAdapter"
-    root: "/path/to/dermoscopy"
+    root: "./data/dermoscopy"
     image_dir: "images"
     mask_dir: "masks"
     image_exts: [".png", ".jpg"]
@@ -87,13 +87,13 @@ models:
     mode: ["prompt_bbox", "automatic"]
     weights:
       - id: "sam_b"
-        checkpoint: "weight/sam_vit_b_01ec64.pth"
+        checkpoint: "weights/sam_vit_b_01ec64.pth"
         model_type: "vit_b"
       - id: "sam_l"
-        checkpoint: "weight/sam_vit_l_0b3195.pth"
+        checkpoint: "weights/sam_vit_l_0b3195.pth"
         model_type: "vit_l"
       - id: "sam_h"
-        checkpoint: "weight/sam_vit_h_4b8939.pth"
+        checkpoint: "weights/sam_vit_h_4b8939.pth"
         model_type: "vit_h"
 
   # SAM2
@@ -102,10 +102,10 @@ models:
     mode: ["prompt_bbox", "automatic"]
     weights:
       - id: "sam2_t"
-        checkpoint: "weight/sam2_t.pt"
+        checkpoint: "weights/sam2_t.pt"
         model_type: "sam2_t"
       - id: "sam2_s"
-        checkpoint: "weight/sam2_s.pt"
+        checkpoint: "weights/sam2_s.pt"
         model_type: "sam2_s"
 
   # MedSAM
@@ -114,7 +114,7 @@ models:
     mode: ["prompt_bbox"]
     weights:
       - id: "medsam"
-        checkpoint: "/path/to/medsam_vit_b.pth"
+        checkpoint: "weights/medsam_vit_b.pth"
         model_type: "vit_b"
 
 # ============================================================================
