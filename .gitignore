@@ -2,3 +2,7 @@
 *.pth
 *.pt
 Montgomery/
+__pycache__/
+*.pyc
+logs/
+results/
