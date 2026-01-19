@@ -67,7 +67,7 @@ class PDFReportBuilder:
             spaceAfter=6
         ))
         self.styles.add(ParagraphStyle(
-            name='BodyText',
+            name='MyBodyText',
             parent=self.styles['Normal'],
             fontSize=10,
             leading=14
@@ -207,7 +207,7 @@ class PDFReportBuilder:
             f"• Models: {len(self.cfg.get('models', []))}",
         ]
         for item in config_items:
-            story.append(Paragraph(item, self.styles['BodyText']))
+            story.append(Paragraph(item, self.styles['MyBodyText']))
         
         story.append(Spacer(1, 0.5*cm))
         
@@ -258,7 +258,7 @@ class PDFReportBuilder:
         
         datasets = self.cfg.get("datasets", [])
         for ds in datasets:
-            story.append(Paragraph(f"<b>{ds.get('name', 'Unknown')}</b>", self.styles['BodyText']))
+            story.append(Paragraph(f"<b>{ds.get('name', 'Unknown')}</b>", self.styles['MyBodyText']))
             story.append(Paragraph(f"  Adapter: {ds.get('adapter', 'N/A')}", self.styles['SmallText']))
             story.append(Paragraph(f"  Root: {ds.get('root', 'N/A')}", self.styles['SmallText']))
             story.append(Spacer(1, 0.3*cm))
@@ -321,7 +321,7 @@ class PDFReportBuilder:
         ]
         
         for proto, desc in protocols_desc:
-            story.append(Paragraph(f"<b>{proto}:</b> {desc}", self.styles['BodyText']))
+            story.append(Paragraph(f"<b>{proto}:</b> {desc}", self.styles['MyBodyText']))
         
         return story
     
@@ -332,7 +332,7 @@ class PDFReportBuilder:
         story.append(Paragraph("Quantitative Results", self.styles['SectionTitle']))
         
         if len(agg_df) == 0:
-            story.append(Paragraph("No aggregate data available.", self.styles['BodyText']))
+            story.append(Paragraph("No aggregate data available.", self.styles['MyBodyText']))
             return story
         
         # Summary table by model
@@ -383,7 +383,7 @@ class PDFReportBuilder:
         story.append(Paragraph("Stability Analysis", self.styles['SectionTitle']))
         
         if len(stability_df) == 0:
-            story.append(Paragraph("No stability data available.", self.styles['BodyText']))
+            story.append(Paragraph("No stability data available.", self.styles['MyBodyText']))
             return story
         
         story.append(Paragraph("Performance Drop by Noise Type", self.styles['SubSection']))
@@ -424,7 +424,7 @@ class PDFReportBuilder:
         story.append(Paragraph("Sensitivity Plots", self.styles['SectionTitle']))
         
         if not figure_paths:
-            story.append(Paragraph("No plots generated.", self.styles['BodyText']))
+            story.append(Paragraph("No plots generated.", self.styles['MyBodyText']))
             return story
         
         # Add up to 6 plots
@@ -454,12 +454,12 @@ class PDFReportBuilder:
         
         story.append(Paragraph(
             "The following samples show the largest performance degradation from clean (L0) to severe noise (L4).",
-            self.styles['BodyText']
+            self.styles['MyBodyText']
         ))
         story.append(Spacer(1, 0.5*cm))
         
         if not failure_paths:
-            story.append(Paragraph("No failure cases to display.", self.styles['BodyText']))
+            story.append(Paragraph("No failure cases to display.", self.styles['MyBodyText']))
             return story
         
         for i, fail_path in enumerate(failure_paths[:8]):
@@ -497,7 +497,7 @@ class PDFReportBuilder:
         ]
         
         for fname, desc in files:
-            story.append(Paragraph(f"• <b>{fname}</b>: {desc}", self.styles['BodyText']))
+            story.append(Paragraph(f"• <b>{fname}</b>: {desc}", self.styles['MyBodyText']))
         
         story.append(Spacer(1, 1*cm))
         story.append(Paragraph(
