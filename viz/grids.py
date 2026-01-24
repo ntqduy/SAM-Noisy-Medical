@@ -238,3 +238,264 @@ def create_noise_comparison_grid(
     plt.close()
     
     return img
+
+
+def save_noise_gallery(
+    df: pd.DataFrame,
+    cfg: dict,
+    out_dir: Path,
+    num_samples: int = 3,
+    noise_types: List[str] = None,
+    levels: List[str] = None
+) -> List[str]:
+    """
+    Create noise gallery showing image quality degradation across noise types and levels.
+    
+    For each sample, creates a grid showing:
+      - Rows: noise types
+      - Columns: levels (L0, L2, L4)
+      - Each cell: noisy image with prediction overlay + metrics
+    
+    Args:
+        df: Results DataFrame with img_path, mask_path, psnr, ssim columns
+        cfg: Configuration dictionary
+        out_dir: Output directory for gallery images
+        num_samples: Number of samples to include
+        noise_types: List of noise types to include (None = all)
+        levels: List of levels to show (default: ["L0", "L2", "L4"])
+        
+    Returns:
+        List of saved image paths
+    """
+    out_dir = Path(out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    paths = []
+    
+    if levels is None:
+        levels = ["L0", "L2", "L4"]
+    
+    # Get noise types from data
+    if noise_types is None:
+        noise_types = sorted([n for n in df["noise"].unique() if n != "clean"])
+    noise_types = [n for n in noise_types if n in df["noise"].values]
+    
+    if len(noise_types) == 0:
+        return paths
+    
+    # Get sample IDs
+    base = df[df["protocol"] == "P0"]
+    if len(base) == 0:
+        return paths
+    
+    sample_ids = base["id"].dropna().unique().tolist()[:num_samples]
+    
+    exp_name = cfg["exp"]["name"]
+    pred_root = Path(cfg["exp"].get("out_root", "outputs")) / exp_name / "pred_masks"
+    
+    for sid in sample_ids:
+        # Get base row for image/gt paths
+        r0 = base[base["id"] == sid]
+        if len(r0) == 0:
+            continue
+        r0 = r0.iloc[0]
+        
+        try:
+            img = _safe_read_gray(r0["img_path"])
+            gt = _safe_read_mask(r0["mask_path"])
+        except Exception:
+            continue
+        
+        n_rows = len(noise_types) + 1  # +1 for clean row
+        n_cols = len(levels)
+        
+        fig, axes = plt.subplots(n_rows, n_cols, figsize=(4 * n_cols, 3.5 * n_rows))
+        if n_rows == 1:
+            axes = axes.reshape(1, -1)
+        if n_cols == 1:
+            axes = axes.reshape(-1, 1)
+        
+        # Row 0: Clean (P0)
+        for j, lv in enumerate(levels):
+            ax = axes[0, j]
+            if lv == "L0" or lv == levels[0]:
+                # Show clean image
+                ax.imshow(img, cmap="gray")
+                ax.set_title("Clean (L0)", fontsize=10)
+                
+                # Get PSNR/SSIM if available
+                psnr = r0.get("psnr", None)
+                ssim = r0.get("ssim", None)
+                if psnr is not None and not np.isnan(psnr):
+                    ax.text(0.02, 0.98, f"PSNR: {psnr:.1f}\nSSIM: {ssim:.3f}" if ssim else f"PSNR: {psnr:.1f}",
+                           transform=ax.transAxes, fontsize=8, verticalalignment='top',
+                           bbox=dict(boxstyle='round', facecolor='white', alpha=0.7))
+            else:
+                ax.axis("off")
+            ax.axis("off")
+        
+        # Rows 1+: Each noise type
+        for i, noise in enumerate(noise_types, start=1):
+            for j, lv in enumerate(levels):
+                ax = axes[i, j]
+                
+                if lv == "L0":
+                    # Clean reference for this noise row
+                    ax.imshow(img, cmap="gray")
+                    ax.set_ylabel(noise, fontsize=10, rotation=90, labelpad=10)
+                    ax.set_title("Clean" if i == 1 else "", fontsize=9)
+                else:
+                    # Find noisy row
+                    rows = df[
+                        (df["id"] == sid) &
+                        (df["protocol"] == "P1") &
+                        (df["level"] == lv) &
+                        (df["noise"] == noise)
+                    ]
+                    
+                    if len(rows) > 0:
+                        row = rows.iloc[0]
+                        
+                        # Load noisy image if stored, else use original
+                        # In current design, we may need to re-apply noise
+                        # For gallery, we just show the prediction overlay
+                        
+                        # Try to load prediction
+                        pred_path = pred_root / row["dataset"] / row["model"] / row["weight"] / row["mode"] / "P1" / noise / str(lv) / f"{sid}.png"
+                        
+                        if pred_path.exists():
+                            pred = _safe_read_mask(str(pred_path))
+                            vis = overlay(img, pred, alpha=0.4, color=(255, 100, 0))
+                            ax.imshow(vis)
+                        else:
+                            ax.imshow(img, cmap="gray")
+                        
+                        # Add metrics
+                        psnr = row.get("psnr", None)
+                        ssim = row.get("ssim", None)
+                        dice = row.get("dice", None)
+                        
+                        info_lines = []
+                        if psnr is not None and not np.isnan(psnr):
+                            info_lines.append(f"PSNR: {psnr:.1f}")
+                        if ssim is not None and not np.isnan(ssim):
+                            info_lines.append(f"SSIM: {ssim:.3f}")
+                        if dice is not None and not np.isnan(dice):
+                            info_lines.append(f"Dice: {dice:.3f}")
+                        
+                        if info_lines:
+                            ax.text(0.02, 0.98, "\n".join(info_lines),
+                                   transform=ax.transAxes, fontsize=7, verticalalignment='top',
+                                   bbox=dict(boxstyle='round', facecolor='white', alpha=0.7))
+                        
+                        ax.set_title(f"{lv}", fontsize=9)
+                    else:
+                        ax.imshow(np.zeros_like(img), cmap="gray")
+                        ax.set_title(f"{lv} (N/A)", fontsize=9)
+                
+                ax.axis("off")
+                
+                # Set row label on leftmost column
+                if j == 0 and i > 0:
+                    ax.set_ylabel(noise, fontsize=10)
+        
+        plt.suptitle(f"Noise Gallery: {sid}", fontsize=12, fontweight='bold')
+        plt.tight_layout()
+        
+        out_path = out_dir / f"noise_gallery_{sid}.png"
+        plt.savefig(out_path, dpi=150, bbox_inches='tight')
+        plt.close()
+        paths.append(str(out_path))
+    
+    # Also create a summary gallery (all noise types, one sample, all levels)
+    if len(sample_ids) > 0:
+        _create_summary_noise_gallery(df, cfg, out_dir, sample_ids[0], noise_types, levels, pred_root)
+        paths.append(str(out_dir / "noise_gallery_summary.png"))
+    
+    return paths
+
+
+def _create_summary_noise_gallery(
+    df: pd.DataFrame,
+    cfg: dict,
+    out_dir: Path,
+    sample_id: str,
+    noise_types: List[str],
+    levels: List[str],
+    pred_root: Path
+):
+    """Create a single summary image showing all noise types and levels."""
+    base = df[(df["protocol"] == "P0") & (df["id"] == sample_id)]
+    if len(base) == 0:
+        return
+    
+    r0 = base.iloc[0]
+    
+    try:
+        img = _safe_read_gray(r0["img_path"])
+        gt = _safe_read_mask(r0["mask_path"])
+    except Exception:
+        return
+    
+    n_rows = len(noise_types)
+    n_cols = len(levels) - 1  # Exclude L0 from noise rows
+    
+    if n_rows == 0 or n_cols == 0:
+        return
+    
+    fig, axes = plt.subplots(n_rows, n_cols, figsize=(3 * n_cols, 3 * n_rows))
+    if n_rows == 1:
+        axes = axes.reshape(1, -1)
+    if n_cols == 1:
+        axes = axes.reshape(-1, 1)
+    
+    display_levels = [lv for lv in levels if lv != "L0"]
+    
+    for i, noise in enumerate(noise_types):
+        for j, lv in enumerate(display_levels):
+            ax = axes[i, j]
+            
+            rows = df[
+                (df["id"] == sample_id) &
+                (df["protocol"] == "P1") &
+                (df["level"] == lv) &
+                (df["noise"] == noise)
+            ]
+            
+            if len(rows) > 0:
+                row = rows.iloc[0]
+                
+                # Load prediction
+                pred_path = pred_root / row["dataset"] / row["model"] / row["weight"] / row["mode"] / "P1" / noise / str(lv) / f"{sample_id}.png"
+                
+                if pred_path.exists():
+                    pred = _safe_read_mask(str(pred_path))
+                    vis = overlay(img, pred, alpha=0.4, color=(255, 100, 0))
+                    ax.imshow(vis)
+                else:
+                    ax.imshow(img, cmap="gray")
+                
+                # Add dice score
+                dice = row.get("dice", None)
+                if dice is not None and not np.isnan(dice):
+                    color = 'green' if dice > 0.8 else 'orange' if dice > 0.6 else 'red'
+                    ax.text(0.5, 0.02, f"Dice: {dice:.2f}",
+                           transform=ax.transAxes, fontsize=8, ha='center',
+                           bbox=dict(boxstyle='round', facecolor=color, alpha=0.7))
+            else:
+                ax.imshow(np.zeros_like(img), cmap="gray")
+            
+            ax.axis("off")
+            
+            # Labels
+            if i == 0:
+                ax.set_title(lv, fontsize=10, fontweight='bold')
+            if j == 0:
+                ax.text(-0.15, 0.5, noise, transform=ax.transAxes, fontsize=10,
+                       rotation=90, va='center', ha='center', fontweight='bold')
+    
+    plt.suptitle(f"Noise Summary: {sample_id}", fontsize=14, fontweight='bold')
+    plt.tight_layout()
+    
+    out_path = out_dir / "noise_gallery_summary.png"
+    plt.savefig(out_path, dpi=150, bbox_inches='tight')
+    plt.close()

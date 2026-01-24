@@ -6,8 +6,23 @@ device: "cuda"   # auto fallback cpu nếu không có cuda
 seed: 42
 limit_n: 0       # 0 = all
 dry_run: false
+verbose: true
 
 phase: 1
+
+# Cache configuration
+cache:
+  enabled: false          # Set true via --use_cache CLI flag
+  cache_dir: null         # Default: {out_root}/{exp_name}/.cache
+  clear_on_start: false   # Clear cache before running
+
+# Debug configuration (for quick testing)
+debug:
+  enabled: false
+  max_samples: null       # Limit samples per protocol case
+  noise_types: null       # Filter to specific noise types, e.g., ["gaussian", "poisson"]
+  levels: null            # Filter to specific levels, e.g., ["L1", "L2"]
+  max_models: null        # Limit number of models to test
 
 datasets:
   - name: "montgomery"
@@ -56,6 +71,18 @@ noises:
 
 levels:
   names: ["L0", "L1", "L2", "L3", "L4"]
+  # Intensity scalars for each level (used for normalization and plotting)
+  intensity_scalars:
+    L0: 0.0
+    L1: 0.25
+    L2: 0.50
+    L3: 0.75
+    L4: 1.0
+
+# Noise seed configuration for reproducibility studies
+noise_config:
+  n_noise_seeds: 1        # Number of different noise seeds per case (increase for seed stability analysis)
+  base_seed: 42           # Base seed for noise generation
 
 protocols:
   enabled: ["P0", "P1", "P2"]  # P3 optional
@@ -82,4 +109,6 @@ outputs:
   num_preview_samples: 8
   preview_levels: ["L0", "L2", "L4"]
   num_failure_cases: 8
+  num_gallery_samples: 3    # Number of samples for noise gallery visualization
   figures_dpi: 160
+  generate_global_plots: true  # Generate global sensitivity plots

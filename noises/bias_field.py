@@ -4,6 +4,23 @@ from noises.base import NoiseBase
 
 
 class BiasField(NoiseBase):
+    """
+    Bias field (intensity inhomogeneity) common in medical imaging.
+    
+    Parameters:
+        strength: Intensity of the bias field (0.0 - 1.0)
+        smooth: Smoothness of the field (kernel size)
+    """
+    
+    PARAM_RANGES = {
+        "strength": (0.0, 1.0),  # Bias field strength
+        "smooth": (16, 256),  # Smoothness kernel
+    }
+    
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self._noise_type = "bias_field"
+    
     def apply(self, x: np.ndarray) -> np.ndarray:
         strength = float(self.params.get("strength", 0.5))  # 0..1
         smooth = int(self.params.get("smooth", 64))

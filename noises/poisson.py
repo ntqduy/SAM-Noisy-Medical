@@ -3,6 +3,21 @@ from noises.base import NoiseBase
 
 
 class PoissonNoise(NoiseBase):
+    """
+    Poisson noise (shot noise).
+    
+    Parameters:
+        lam: Lambda parameter (higher = more noise relative to signal)
+    """
+    
+    PARAM_RANGES = {
+        "lam": (1.0, 60.0),  # Lambda range
+    }
+    
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self._noise_type = "poisson"
+    
     def apply(self, x: np.ndarray) -> np.ndarray:
         lam = float(self.params.get("lam", 20.0))
         x_f = x.astype(np.float32) / 255.0

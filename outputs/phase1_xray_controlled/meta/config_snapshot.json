@@ -5,14 +5,33 @@
   },
   "device": "cuda",
   "seed": 42,
-  "limit_n": 10,
+  "limit_n": 0,
   "dry_run": true,
+  "verbose": true,
   "phase": 1,
+  "cache": {
+    "enabled": true,
+    "cache_dir": null,
+    "clear_on_start": false,
+    "use_cache": true,
+    "overwrite_cache": false,
+    "only_report": false,
+    "skip_inference": false
+  },
+  "debug": {
+    "enabled": false,
+    "max_samples": 2,
+    "noise_types": [
+      "gaussian"
+    ],
+    "levels": null,
+    "max_models": null
+  },
   "datasets": [
     {
       "name": "montgomery",
       "adapter": "ImageMaskFolderAdapter",
-      "root": "/content/Montgomery/Montgomery",
+      "root": "./data/montgomery",
       "image_dir": "img",
       "mask_dir": "mask",
       "image_exts": [
@@ -85,7 +104,20 @@
       "L2",
       "L3",
       "L4"
-    ]
+    ],
+    "intensity_scalars": {
+      "L0": 0.0,
+      "L1": 0.25,
+      "L2": 0.5,
+      "L3": 0.75,
+      "L4": 1.0
+    }
+  },
+  "noise_config": {
+    "n_noise_seeds": 1,
+    "base_seed": 42,
+    "noise_seed": 42,
+    "compute_distortion": true
   },
   "protocols": {
     "enabled": [
@@ -242,6 +274,10 @@
       "L4"
     ],
     "num_failure_cases": 8,
-    "figures_dpi": 160
+    "num_gallery_samples": 3,
+    "figures_dpi": 160,
+    "generate_global_plots": true,
+    "save_prob_maps": false,
+    "noise_gallery_samples": 3
   }
 }

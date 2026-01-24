@@ -1,9 +1,21 @@
+"""
+Optional/Phase 2 noise types for AIO25 NoisySAM benchmark.
+Each noise includes PARAM_RANGES for severity normalization.
+"""
 import numpy as np
 import cv2
 from noises.base import NoiseBase
 
 
 class SpeckleNoise(NoiseBase):
+    """Multiplicative speckle noise (common in ultrasound/radar)."""
+    
+    PARAM_RANGES = {"sigma": (0.0, 0.3)}
+    
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self._noise_type = "speckle"
+    
     def apply(self, x: np.ndarray) -> np.ndarray:
         sigma = float(self.params.get("sigma", 0.08))  # relative
         n = self.rng.normal(0.0, sigma, size=x.shape).astype(np.float32)
@@ -12,6 +24,14 @@ class SpeckleNoise(NoiseBase):
 
 
 class UniformNoise(NoiseBase):
+    """Additive uniform noise."""
+    
+    PARAM_RANGES = {"b": (0.0, 50.0)}  # Use upper bound as primary
+    
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self._noise_type = "uniform"
+    
     def apply(self, x: np.ndarray) -> np.ndarray:
         a = float(self.params.get("a", -10.0))
         b = float(self.params.get("b", 10.0))
@@ -20,6 +40,21 @@ class UniformNoise(NoiseBase):
 
 
 class JPEGArtifacts(NoiseBase):
+    """JPEG compression artifacts."""
+    
+    PARAM_RANGES = {"quality": (10, 95)}
+    
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self._noise_type = "jpeg"
+    
+    def get_severity_scalar(self) -> float:
+        """Lower quality = higher severity."""
+        quality = float(self.params.get("quality", 40))
+        min_q, max_q = self.PARAM_RANGES["quality"]
+        normalized = 1.0 - (quality - min_q) / (max_q - min_q)
+        return float(np.clip(normalized, 0.0, 1.0))
+    
     def apply(self, x: np.ndarray) -> np.ndarray:
         quality = int(self.params.get("quality", 40))
         rgb = cv2.cvtColor(x, cv2.COLOR_GRAY2BGR)
@@ -33,6 +68,14 @@ class JPEGArtifacts(NoiseBase):
 
 
 class QuantizationNoise(NoiseBase):
+    """Quantization/posterization noise."""
+    
+    PARAM_RANGES = {"step": (1, 64)}
+    
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self._noise_type = "quantization"
+    
     def apply(self, x: np.ndarray) -> np.ndarray:
         step = int(self.params.get("step", 8))
         step = max(1, step)
@@ -41,6 +84,14 @@ class QuantizationNoise(NoiseBase):
 
 
 class DefocusBlur(NoiseBase):
+    """Defocus/Gaussian blur."""
+    
+    PARAM_RANGES = {"k": (3, 31)}
+    
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self._noise_type = "defocus_blur"
+    
     def apply(self, x: np.ndarray) -> np.ndarray:
         k = int(self.params.get("k", 7))
         k = max(3, k | 1)
@@ -49,6 +100,22 @@ class DefocusBlur(NoiseBase):
 
 
 class CoarseDropout(NoiseBase):
+    """Random rectangular region dropout."""
+    
+    PARAM_RANGES = {"holes": (1, 20), "size": (8, 64)}
+    
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self._noise_type = "coarse_dropout"
+    
+    def get_severity_scalar(self) -> float:
+        """Combine holes and size for severity."""
+        holes = int(self.params.get("holes", 8))
+        size = int(self.params.get("size", 24))
+        h_norm = (holes - 1) / (20 - 1)
+        s_norm = (size - 8) / (64 - 8)
+        return float(np.clip((h_norm + s_norm) / 2, 0.0, 1.0))
+    
     def apply(self, x: np.ndarray) -> np.ndarray:
         holes = int(self.params.get("holes", 8))
         size = int(self.params.get("size", 24))
@@ -64,6 +131,22 @@ class CoarseDropout(NoiseBase):
 
 
 class GridMask(NoiseBase):
+    """Grid-based masking/dropout."""
+    
+    PARAM_RANGES = {"d": (16, 96), "r": (8, 48)}
+    
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self._noise_type = "gridmask"
+    
+    def get_severity_scalar(self) -> float:
+        """Ratio of masked area."""
+        d = int(self.params.get("d", 48))
+        r = int(self.params.get("r", 24))
+        # Approximate mask ratio
+        mask_ratio = min(1.0, (2 * r) / d)
+        return float(np.clip(mask_ratio, 0.0, 1.0))
+    
     def apply(self, x: np.ndarray) -> np.ndarray:
         d = int(self.params.get("d", 48))
         r = int(self.params.get("r", 24))

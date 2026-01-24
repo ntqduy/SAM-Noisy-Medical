@@ -15,6 +15,23 @@ def motion_kernel(k: int, angle: float) -> np.ndarray:
 
 
 class MotionBlur(NoiseBase):
+    """
+    Motion blur simulation.
+    
+    Parameters:
+        k: Kernel size (larger = more blur)
+        angle: Motion direction in degrees
+    """
+    
+    PARAM_RANGES = {
+        "k": (3, 25),  # Kernel size
+        "angle": (0, 180),  # Angle range
+    }
+    
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self._noise_type = "motion_blur"
+    
     def apply(self, x: np.ndarray) -> np.ndarray:
         k = int(self.params.get("k", 9))
         angle = float(self.params.get("angle", 15.0))

@@ -2,14 +2,19 @@
 PDF Report Builder for SAM Benchmark Results.
 
 Generates comprehensive PDF reports including:
-  - Executive summary
+  - Executive summary with config snapshot
   - Dataset & phase settings
-  - Noise preset tables
-  - Quantitative results tables
-  - Sensitivity plots
+  - Noise preset tables (with intensity scalars)
+  - Quantitative results tables (Dice, IoU, HD95)
+  - Extended stability metrics (drop_Lmax, slope, AUC, CV)
+  - Uncertainty analysis
+  - Noise gallery visualizations
+  - Sensitivity plots and global heatmaps
   - Side-by-side comparison grids
   - Failure case analysis
   - Appendix with raw data references
+
+Extended for AIO25 NoisySAM project requirements.
 """
 from pathlib import Path
 from typing import Dict, List, Any, Optional
@@ -87,7 +92,9 @@ class PDFReportBuilder:
         stability_df: pd.DataFrame,
         figure_paths: List[str],
         failure_paths: List[str],
-        out_path: Path
+        out_path: Path,
+        noise_gallery_paths: List[str] = None,
+        global_plot_paths: List[str] = None
     ):
         """
         Build the complete PDF report.
@@ -99,6 +106,8 @@ class PDFReportBuilder:
             figure_paths: List of figure image paths
             failure_paths: List of failure case image paths
             out_path: Output PDF path
+            noise_gallery_paths: List of noise gallery image paths
+            global_plot_paths: List of global comparative plot paths
         """
         out_path = Path(out_path)
         out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -133,8 +142,19 @@ class PDFReportBuilder:
         story.extend(self._build_quantitative_section(agg_df))
         story.append(PageBreak())
         
-        # Stability Analysis
-        story.extend(self._build_stability_section(stability_df))
+        # Stability Analysis (extended)
+        story.extend(self._build_stability_section_extended(stability_df))
+        
+        # Uncertainty Analysis
+        story.extend(self._build_uncertainty_section(df))
+        
+        # Noise Gallery
+        if noise_gallery_paths:
+            story.extend(self._build_noise_gallery_section(noise_gallery_paths))
+        
+        # Global Comparative Plots
+        if global_plot_paths:
+            story.extend(self._build_global_plots_section(global_plot_paths))
         
         # Sensitivity Plots
         story.extend(self._build_plots_section(figure_paths))
@@ -377,7 +397,7 @@ class PDFReportBuilder:
         return story
     
     def _build_stability_section(self, stability_df: pd.DataFrame) -> List:
-        """Build stability analysis section."""
+        """Build stability analysis section (basic version for backward compatibility)."""
         story = []
         
         story.append(Paragraph("Stability Analysis", self.styles['SectionTitle']))
@@ -413,6 +433,268 @@ class PDFReportBuilder:
             ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
         ]))
         story.append(stab_table)
+        
+        return story
+    
+    def _build_stability_section_extended(self, stability_df: pd.DataFrame) -> List:
+        """Build extended stability analysis section with drop_Lmax, slope, AUC, CV."""
+        story = []
+        
+        story.append(Paragraph("Stability Analysis (Extended)", self.styles['SectionTitle']))
+        
+        if len(stability_df) == 0:
+            story.append(Paragraph("No stability data available.", self.styles['MyBodyText']))
+            return story
+        
+        # Check for extended metrics
+        extended_cols = ["drop_Lmax", "slope", "auc", "cv", "seed_std", "seed_cv"]
+        has_extended = any(c in stability_df.columns for c in extended_cols)
+        
+        if not has_extended:
+            # Fall back to basic stability section
+            return self._build_stability_section(stability_df)
+        
+        # Extended metrics table
+        story.append(Paragraph("Extended Stability Metrics", self.styles['SubSection']))
+        story.append(Paragraph(
+            "• <b>drop_Lmax</b>: Dice(L0) - Dice(L4) — performance drop at maximum severity<br/>"
+            "• <b>slope</b>: Linear regression slope of Dice vs intensity_scalar<br/>"
+            "• <b>AUC</b>: Area under curve (normalized) — higher is better<br/>"
+            "• <b>CV</b>: Coefficient of variation (std/mean) across levels<br/>"
+            "• <b>seed_std/cv</b>: Variability across noise seeds",
+            self.styles['SmallText']
+        ))
+        story.append(Spacer(1, 0.3*cm))
+        
+        # Build table with available columns
+        cols_to_show = ["noise", "model", "weight"]
+        col_labels = ["Noise", "Model", "Weight"]
+        
+        if "drop_Lmax" in stability_df.columns:
+            cols_to_show.append("drop_Lmax")
+            col_labels.append("Drop_Lmax")
+        if "slope" in stability_df.columns:
+            cols_to_show.append("slope")
+            col_labels.append("Slope")
+        if "auc" in stability_df.columns:
+            cols_to_show.append("auc")
+            col_labels.append("AUC")
+        if "cv" in stability_df.columns:
+            cols_to_show.append("cv")
+            col_labels.append("CV")
+        
+        # Sort by drop_Lmax if available
+        sort_col = "drop_Lmax" if "drop_Lmax" in stability_df.columns else stability_df.columns[0]
+        sorted_df = stability_df.sort_values(sort_col, ascending=False, na_position="last").head(20)
+        
+        rows = [col_labels]
+        for _, row in sorted_df.iterrows():
+            row_data = []
+            for col in cols_to_show:
+                val = row.get(col, "")
+                if isinstance(val, float):
+                    row_data.append(f"{val:.4f}" if not np.isnan(val) else "-")
+                else:
+                    row_data.append(str(val))
+            rows.append(row_data)
+        
+        n_cols = len(col_labels)
+        col_widths = [2.5*cm] * min(n_cols, 7)
+        
+        stab_table = Table(rows, colWidths=col_widths)
+        stab_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), HexColor('#fed7d7')),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, -1), 8),
+            ('GRID', (0, 0), (-1, -1), 0.5, colors.gray),
+            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 3),
+            ('TOPPADDING', (0, 0), (-1, -1), 3),
+        ]))
+        story.append(stab_table)
+        
+        # Seed stability section (if available)
+        if "seed_std" in stability_df.columns and stability_df["seed_std"].notna().any():
+            story.append(Spacer(1, 0.5*cm))
+            story.append(Paragraph("Seed Stability", self.styles['SubSection']))
+            
+            seed_data = stability_df[stability_df["seed_std"].notna()].copy()
+            if len(seed_data) > 0:
+                seed_data = seed_data.sort_values("seed_std", ascending=False).head(10)
+                
+                seed_rows = [["Noise", "Model", "Seed Std", "Seed CV"]]
+                for _, row in seed_data.iterrows():
+                    seed_rows.append([
+                        str(row.get("noise", "")),
+                        f"{row.get('model', '')}/{row.get('weight', '')}",
+                        f"{row.get('seed_std', 0):.4f}" if not np.isnan(row.get("seed_std", np.nan)) else "-",
+                        f"{row.get('seed_cv', 0):.4f}" if not np.isnan(row.get("seed_cv", np.nan)) else "-",
+                    ])
+                
+                seed_table = Table(seed_rows, colWidths=[3*cm, 4*cm, 2.5*cm, 2.5*cm])
+                seed_table.setStyle(TableStyle([
+                    ('BACKGROUND', (0, 0), (-1, 0), HexColor('#e2e8f0')),
+                    ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                    ('FONTSIZE', (0, 0), (-1, -1), 9),
+                    ('GRID', (0, 0), (-1, -1), 0.5, colors.gray),
+                    ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+                ]))
+                story.append(seed_table)
+        
+        return story
+    
+    def _build_uncertainty_section(self, df: pd.DataFrame) -> List:
+        """Build uncertainty analysis section."""
+        story = []
+        
+        uncertainty_cols = ["mean_confidence", "mean_entropy", "boundary_entropy", 
+                          "mean_confidence_proxy", "mask_consistency_iou"]
+        available = [c for c in uncertainty_cols if c in df.columns and df[c].notna().any()]
+        
+        if not available:
+            return story
+        
+        story.append(PageBreak())
+        story.append(Paragraph("Uncertainty Analysis", self.styles['SectionTitle']))
+        
+        story.append(Paragraph(
+            "Uncertainty metrics help identify predictions where the model is less confident. "
+            "Higher entropy and lower confidence typically correlate with worse segmentation quality.",
+            self.styles['MyBodyText']
+        ))
+        story.append(Spacer(1, 0.3*cm))
+        
+        # Summary statistics
+        story.append(Paragraph("Uncertainty Metrics Summary", self.styles['SubSection']))
+        
+        summary_rows = [["Metric", "Mean", "Std", "Min", "Max"]]
+        for col in available:
+            vals = df[col].dropna()
+            if len(vals) > 0:
+                summary_rows.append([
+                    col.replace("_", " ").title(),
+                    f"{vals.mean():.4f}",
+                    f"{vals.std():.4f}",
+                    f"{vals.min():.4f}",
+                    f"{vals.max():.4f}",
+                ])
+        
+        if len(summary_rows) > 1:
+            uncert_table = Table(summary_rows, colWidths=[4*cm, 2.5*cm, 2.5*cm, 2.5*cm, 2.5*cm])
+            uncert_table.setStyle(TableStyle([
+                ('BACKGROUND', (0, 0), (-1, 0), HexColor('#c6f6d5')),
+                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                ('FONTSIZE', (0, 0), (-1, -1), 9),
+                ('GRID', (0, 0), (-1, -1), 0.5, colors.gray),
+                ('ALIGN', (1, 0), (-1, -1), 'CENTER'),
+            ]))
+            story.append(uncert_table)
+        
+        # Correlation with performance
+        if "dice" in df.columns:
+            story.append(Spacer(1, 0.3*cm))
+            story.append(Paragraph("Correlation with Dice Score", self.styles['SubSection']))
+            
+            corr_rows = [["Uncertainty Metric", "Pearson Correlation"]]
+            for col in available:
+                valid = df[["dice", col]].dropna()
+                if len(valid) > 10:
+                    corr = np.corrcoef(valid["dice"], valid[col])[0, 1]
+                    corr_rows.append([col.replace("_", " ").title(), f"{corr:.4f}"])
+            
+            if len(corr_rows) > 1:
+                corr_table = Table(corr_rows, colWidths=[5*cm, 3*cm])
+                corr_table.setStyle(TableStyle([
+                    ('BACKGROUND', (0, 0), (-1, 0), HexColor('#e2e8f0')),
+                    ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                    ('FONTSIZE', (0, 0), (-1, -1), 9),
+                    ('GRID', (0, 0), (-1, -1), 0.5, colors.gray),
+                    ('ALIGN', (1, 0), (1, -1), 'CENTER'),
+                ]))
+                story.append(corr_table)
+        
+        return story
+    
+    def _build_noise_gallery_section(self, gallery_paths: List[str]) -> List:
+        """Build noise gallery visualization section."""
+        story = []
+        
+        if not gallery_paths:
+            return story
+        
+        story.append(PageBreak())
+        story.append(Paragraph("Noise Gallery", self.styles['SectionTitle']))
+        
+        story.append(Paragraph(
+            "Visual comparison of image quality degradation across noise types and severity levels. "
+            "Each panel shows the noisy image with prediction overlay and associated metrics (PSNR, SSIM, Dice).",
+            self.styles['MyBodyText']
+        ))
+        story.append(Spacer(1, 0.5*cm))
+        
+        # Add gallery images
+        for i, img_path in enumerate(gallery_paths[:6]):  # Limit to 6 galleries
+            if not Path(img_path).exists():
+                continue
+            
+            try:
+                # Determine if it's a wide or tall image
+                img = RLImage(img_path, width=16*cm, height=12*cm)
+                story.append(img)
+                story.append(Spacer(1, 0.5*cm))
+                
+                # Page break after every image (galleries are large)
+                if i < len(gallery_paths) - 1:
+                    story.append(PageBreak())
+            except Exception:
+                continue
+        
+        return story
+    
+    def _build_global_plots_section(self, plot_paths: List[str]) -> List:
+        """Build global comparative plots section."""
+        story = []
+        
+        if not plot_paths:
+            return story
+        
+        story.append(PageBreak())
+        story.append(Paragraph("Global Comparative Analysis", self.styles['SectionTitle']))
+        
+        story.append(Paragraph(
+            "These plots provide a global view of model sensitivity across all noise types, "
+            "including sensitivity heatmaps, ranking charts, and PSNR/performance correlations.",
+            self.styles['MyBodyText']
+        ))
+        story.append(Spacer(1, 0.5*cm))
+        
+        # Categorize plots by type
+        heatmaps = [p for p in plot_paths if "heatmap" in p.lower()]
+        rankings = [p for p in plot_paths if "ranking" in p.lower()]
+        curves = [p for p in plot_paths if "curve" in p.lower()]
+        others = [p for p in plot_paths if p not in heatmaps + rankings + curves]
+        
+        def add_plot_group(paths: List[str], title: str, max_plots: int = 4):
+            if not paths:
+                return
+            story.append(Paragraph(title, self.styles['SubSection']))
+            for i, img_path in enumerate(paths[:max_plots]):
+                if not Path(img_path).exists():
+                    continue
+                try:
+                    img = RLImage(img_path, width=14*cm, height=8*cm)
+                    story.append(img)
+                    story.append(Spacer(1, 0.3*cm))
+                    if (i + 1) % 2 == 0 and i < len(paths) - 1:
+                        story.append(PageBreak())
+                except Exception:
+                    continue
+        
+        add_plot_group(heatmaps, "Sensitivity Heatmaps")
+        add_plot_group(rankings, "Impact Rankings")
+        add_plot_group(curves, "Sensitivity Curves")
+        add_plot_group(others, "Additional Plots")
         
         return story
     
@@ -515,7 +797,9 @@ def build_report_pdf(
     cfg: dict,
     exp_dir: Path,
     figure_paths: List[str],
-    failure_paths: List[str]
+    failure_paths: List[str],
+    noise_gallery_paths: List[str] = None,
+    global_plot_paths: List[str] = None
 ) -> Path:
     """
     Build the complete PDF report.
@@ -528,6 +812,8 @@ def build_report_pdf(
         exp_dir: Experiment output directory
         figure_paths: List of figure image paths
         failure_paths: List of failure case image paths
+        noise_gallery_paths: List of noise gallery image paths
+        global_plot_paths: List of global comparative plot paths
         
     Returns:
         Path to generated PDF
@@ -542,7 +828,9 @@ def build_report_pdf(
         stability_df=stability_df,
         figure_paths=figure_paths,
         failure_paths=failure_paths,
-        out_path=out_path
+        out_path=out_path,
+        noise_gallery_paths=noise_gallery_paths or [],
+        global_plot_paths=global_plot_paths or []
     )
     
     return out_path

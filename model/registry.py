@@ -37,7 +37,7 @@ _RUNNER_FACTORY = {
     "SAM3": _get_sam3_runner,
 }
 
-
+# Init model runner
 def build_model_runner(runner_key: str, weight_cfg: Dict[str, Any], mode: str, device: str = "cpu") -> BaseModelRunner:
     """
     Build a model runner given:
