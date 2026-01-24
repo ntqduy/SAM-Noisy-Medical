@@ -267,16 +267,6 @@ def run_experiment(cfg: Dict[str, Any]):
     if len(model_runners) == 0:
         raise RuntimeError("No valid models/weights found (all checkpoints missing?).")
 
-    # Skip inference if requested
-    if skip_inference:
-        print("[INFO] Skip inference mode: loading existing results if available")
-        if results_csv.exists():
-            df = pd.read_csv(results_csv)
-            _generate_outputs(df, cfg, exp_dir, figures_dir, outputs_cfg)
-            return
-        else:
-            print("[WARN] No existing results.csv found, running inference")
-
     # Main experiment loop
     for dataset_name, ds in datasets:
         n = len(ds)
