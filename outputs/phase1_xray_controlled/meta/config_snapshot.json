@@ -5,14 +5,14 @@
   },
   "device": "cuda",
   "seed": 42,
-  "limit_n": 0,
-  "dry_run": false,
+  "limit_n": 10,
+  "dry_run": true,
   "phase": 1,
   "datasets": [
     {
       "name": "montgomery",
       "adapter": "ImageMaskFolderAdapter",
-      "root": "./data/montgomery",
+      "root": "/content/Montgomery/Montgomery",
       "image_dir": "img",
       "mask_dir": "mask",
       "image_exts": [

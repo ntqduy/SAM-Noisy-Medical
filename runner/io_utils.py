@@ -4,6 +4,10 @@ from pathlib import Path
 from typing import Any, Dict
 
 import yaml
+import torch  # optional
+import random
+import numpy as np
+
 
 
 def ensure_dir(p: Path) -> Path:
@@ -32,7 +36,6 @@ def get_device(device: str) -> str:
     device = (device or "cpu").lower()
     if device.startswith("cuda"):
         try:
-            import torch  # optional
             if torch.cuda.is_available():
                 return "cuda"
         except Exception:
@@ -41,8 +44,6 @@ def get_device(device: str) -> str:
 
 
 def env_seed_everything(seed: int):
-    import random
-    import numpy as np
     random.seed(seed)
     np.random.seed(seed)
     os.environ["PYTHONHASHSEED"] = str(seed)
