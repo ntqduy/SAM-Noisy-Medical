@@ -177,25 +177,42 @@ def plot_metric_vs_level_by_mode(
     df = _add_intensity_scalars_to_df(df, cfg)
     intensity_scalars = _get_intensity_scalars_from_cfg(cfg)
     
-    sub = df[df["protocol"].isin(protocols)].copy()
-    if len(sub) == 0:
+    # Get P1 data (L1-L4) and P0 data (L0 baseline)
+    sub_p1 = df[df["protocol"].isin(protocols)].copy()
+    sub_p0 = df[df["protocol"] == "P0"].copy()
+    
+    if len(sub_p1) == 0:
         return paths
     
     level_order = ["L0", "L1", "L2", "L3", "L4"]
-    modes = sub["mode"].unique()
+    modes = sub_p1["mode"].unique()
     
     # Generate comparison plots for each mode separately
     for metric in metrics:
-        if metric not in sub.columns:
+        if metric not in sub_p1.columns:
             continue
         
         for mode in modes:
-            mode_data = sub[sub["mode"] == mode]
-            if len(mode_data) == 0:
+            mode_data_p1 = sub_p1[sub_p1["mode"] == mode]
+            mode_data_p0 = sub_p0[sub_p0["mode"] == mode]
+            
+            if len(mode_data_p1) == 0:
                 continue
             
             # Group by dataset, model, weight
-            for (dataset, model, weight), g in mode_data.groupby(["dataset", "model", "weight"]):
+            for (dataset, model, weight), g in mode_data_p1.groupby(["dataset", "model", "weight"]):
+                # Get corresponding P0 baseline for this group
+                g_p0 = mode_data_p0[
+                    (mode_data_p0["dataset"] == dataset) &
+                    (mode_data_p0["model"] == model) &
+                    (mode_data_p0["weight"] == weight)
+                ]
+                
+                # Calculate L0 baseline metric (average across all samples)
+                l0_metric_value = None
+                if len(g_p0) > 0 and metric in g_p0.columns:
+                    l0_metric_value = g_p0[metric].mean()
+                
                 # Plot all noise types on one chart
                 plt.figure(figsize=(12, 7))
                 
@@ -206,8 +223,14 @@ def plot_metric_vs_level_by_mode(
                     noise_data = g[g["noise"] == noise]
                     agg = noise_data.groupby("level")[metric].mean().reset_index()
                     
-                    # Keep only standard levels
+                    # Keep only standard levels (L1-L4 from P1)
                     agg = agg[agg["level"].isin(level_order)].copy()
+                    
+                    # Add L0 baseline point if available
+                    if l0_metric_value is not None:
+                        l0_row = pd.DataFrame({"level": ["L0"], metric: [l0_metric_value]})
+                        agg = pd.concat([l0_row, agg], ignore_index=True)
+                    
                     if len(agg) == 0:
                         continue
                     
@@ -281,7 +304,10 @@ def plot_mode_comparison(
     df = _add_intensity_scalars_to_df(df, cfg)
     intensity_scalars = _get_intensity_scalars_from_cfg(cfg)
     
+    # Get P1 data and P0 baseline
     sub = df[df["protocol"].isin(protocols)].copy()
+    sub_p0 = df[df["protocol"] == "P0"].copy()
+    
     if len(sub) == 0 or metric not in sub.columns:
         return paths
     
@@ -304,6 +330,19 @@ def plot_mode_comparison(
             
             agg = mode_data.groupby("level")[metric].mean().reset_index()
             agg = agg[agg["level"].isin(level_order)].copy()
+            
+            # Add L0 baseline from P0
+            p0_mode_data = sub_p0[
+                (sub_p0["dataset"] == dataset) &
+                (sub_p0["model"] == model) &
+                (sub_p0["weight"] == weight) &
+                (sub_p0["mode"] == mode)
+            ]
+            if len(p0_mode_data) > 0 and metric in p0_mode_data.columns:
+                l0_value = p0_mode_data[metric].mean()
+                l0_row = pd.DataFrame({"level": ["L0"], metric: [l0_value]})
+                agg = pd.concat([l0_row, agg], ignore_index=True)
+            
             if len(agg) == 0:
                 continue
             
