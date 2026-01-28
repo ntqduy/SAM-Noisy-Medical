@@ -103,7 +103,8 @@ def _resolve_image_for_level(
 def identify_top_failures(
     df: pd.DataFrame,
     top_k: int = 10,
-    metric: str = "dice"
+    metric: str = "dice",
+    mode: str = None
 ) -> pd.DataFrame:
     """
     Identify samples with largest performance drop from L0 to L4.
@@ -112,12 +113,18 @@ def identify_top_failures(
         df: Results DataFrame
         top_k: Number of top failures to return
         metric: Metric to measure drop
+        mode: Optional filter by mode (e.g., 'automatic', 'prompt_bbox')
         
     Returns:
         DataFrame with failure cases
     """
+    # Filter by mode if specified
+    df_filtered = df.copy()
+    if mode is not None:
+        df_filtered = df_filtered[df_filtered["mode"] == mode]
+    
     # Get clean baseline (P0)
-    base = df[df["protocol"] == "P0"].copy()
+    base = df_filtered[df_filtered["protocol"] == "P0"].copy()
     if len(base) == 0:
         return pd.DataFrame()
     
@@ -125,7 +132,7 @@ def identify_top_failures(
     base = base[["dataset", "model", "weight", "mode", "id", f"{metric}_L0", "img_path", "mask_path"]]
     
     # Get worst case (L4) from P1
-    worst = df[(df["protocol"] == "P1") & (df["level"] == "L4")].copy()
+    worst = df_filtered[(df_filtered["protocol"] == "P1") & (df_filtered["level"] == "L4")].copy()
     if len(worst) == 0:
         return pd.DataFrame()
     
@@ -154,7 +161,7 @@ def export_failure_cases(
     metric: str = "dice"
 ) -> List[str]:
     """
-    Export visualization of top failure cases.
+    Export visualization of top failure cases for each mode separately.
     
     Creates side-by-side images showing:
       - Original image
@@ -163,11 +170,16 @@ def export_failure_cases(
       - Noisy L4 prediction overlay
       - Performance metrics
     
+    Exports separate folders and visualizations for:
+      - automatic mode
+      - prompt_bbox mode
+      - combined (all modes)
+    
     Args:
         df: Results DataFrame
         cfg: Config dictionary
         out_dir: Output directory
-        top_k: Number of failure cases
+        top_k: Number of failure cases per mode
         metric: Metric for ranking
         
     Returns:
@@ -176,16 +188,87 @@ def export_failure_cases(
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     
-    failures = identify_top_failures(df, top_k=top_k, metric=metric)
-    if len(failures) == 0:
-        return []
-    
     pred_root = get_pred_root(cfg)
     noise_seed = cfg.get("noise_config", {}).get("base_seed", 42)
     
-    logger.info(f"Exporting {len(failures)} failure cases to {out_dir}")
-    logger.info(f"Prediction root: {pred_root}")
+    # Get available modes
+    available_modes = df["mode"].unique().tolist()
+    logger.info(f"Available modes: {available_modes}")
     
+    all_exported = []
+    
+    # Export for each mode separately
+    for mode in available_modes:
+        mode_dir = out_dir / mode
+        mode_dir.mkdir(parents=True, exist_ok=True)
+        
+        failures = identify_top_failures(df, top_k=top_k, metric=metric, mode=mode)
+        if len(failures) == 0:
+            logger.warning(f"No failures found for mode: {mode}")
+            continue
+        
+        logger.info(f"Exporting {len(failures)} failure cases for mode: {mode}")
+        
+        exported = _export_failure_list(
+            failures=failures,
+            cfg=cfg,
+            out_dir=mode_dir,
+            pred_root=pred_root,
+            noise_seed=noise_seed,
+            metric=metric,
+            prefix=f"{mode}_"
+        )
+        all_exported.extend(exported)
+    
+    # Also export combined (all modes)
+    combined_dir = out_dir / "combined"
+    combined_dir.mkdir(parents=True, exist_ok=True)
+    
+    failures_all = identify_top_failures(df, top_k=top_k, metric=metric, mode=None)
+    if len(failures_all) > 0:
+        logger.info(f"Exporting {len(failures_all)} combined failure cases")
+        exported_combined = _export_failure_list(
+            failures=failures_all,
+            cfg=cfg,
+            out_dir=combined_dir,
+            pred_root=pred_root,
+            noise_seed=noise_seed,
+            metric=metric,
+            prefix="combined_"
+        )
+        all_exported.extend(exported_combined)
+    
+    # Create summary markdown
+    _create_failure_summary_markdown(df, out_dir, top_k, metric)
+    
+    logger.info(f"Total exported: {len(all_exported)} failure case visualizations")
+    return all_exported
+
+
+def _export_failure_list(
+    failures: pd.DataFrame,
+    cfg: dict,
+    out_dir: Path,
+    pred_root: Path,
+    noise_seed: int,
+    metric: str,
+    prefix: str = ""
+) -> List[str]:
+    """
+    Export a list of failure cases to visualizations.
+    
+    Args:
+        failures: DataFrame of failure cases
+        cfg: Config dictionary
+        out_dir: Output directory
+        pred_root: Prediction root directory
+        noise_seed: Noise seed
+        metric: Metric name
+        prefix: Filename prefix
+        
+    Returns:
+        List of exported paths
+    """
     exported = []
     not_found_count = 0
     
@@ -306,8 +389,8 @@ def export_failure_cases(
         plt.tight_layout()
         
         # Save as PNG and PDF
-        out_path_png = out_dir / f"failure_{idx:03d}_{sid}_{noise}.png"
-        out_path_pdf = out_dir / f"failure_{idx:03d}_{sid}_{noise}.pdf"
+        out_path_png = out_dir / f"{prefix}failure_{idx:03d}_{sid}_{noise}.png"
+        out_path_pdf = out_dir / f"{prefix}failure_{idx:03d}_{sid}_{noise}.pdf"
         
         plt.savefig(out_path_png, dpi=150, bbox_inches="tight", facecolor='white')
         plt.savefig(out_path_pdf, dpi=150, bbox_inches="tight", facecolor='white')
@@ -320,6 +403,87 @@ def export_failure_cases(
     
     logger.info(f"Exported {len(exported)} failure case visualizations")
     return exported
+
+
+def _create_failure_summary_markdown(
+    df: pd.DataFrame,
+    out_dir: Path,
+    top_k: int,
+    metric: str
+) -> None:
+    """
+    Create a markdown summary of failure cases for each mode.
+    
+    Args:
+        df: Results DataFrame
+        out_dir: Output directory
+        top_k: Number of top failures
+        metric: Metric name
+    """
+    summary_path = out_dir / "failure_summary.md"
+    
+    available_modes = df["mode"].unique().tolist()
+    
+    with open(summary_path, "w", encoding="utf-8") as f:
+        f.write("# Failure Case Analysis Summary\n\n")
+        f.write(f"**Metric**: {metric}  \n")
+        f.write(f"**Top K per mode**: {top_k}\n\n")
+        
+        # Summary by mode
+        for mode in available_modes:
+            f.write(f"\n## Mode: {mode}\n\n")
+            
+            failures = identify_top_failures(df, top_k=top_k, metric=metric, mode=mode)
+            if len(failures) == 0:
+                f.write("No failure cases found.\n")
+                continue
+            
+            # Statistics
+            avg_drop = failures["drop"].mean()
+            max_drop = failures["drop"].max()
+            worst_noise = failures.groupby("noise")["drop"].mean().idxmax()
+            
+            f.write(f"- **Average Drop**: {avg_drop:.4f}  \n")
+            f.write(f"- **Max Drop**: {max_drop:.4f}  \n")
+            f.write(f"- **Worst Noise Type**: {worst_noise}  \n\n")
+            
+            # Table header
+            f.write("| Rank | Sample ID | Noise | Dice L0 | Dice L4 | Drop | Drop % |\n")
+            f.write("|------|-----------|-------|---------|---------|------|--------|\n")
+            
+            for rank, (_, row) in enumerate(failures.iterrows(), 1):
+                f.write(
+                    f"| {rank} | {row['id']} | {row['noise']} | "
+                    f"{row[f'{metric}_L0']:.3f} | {row[f'{metric}_L4']:.3f} | "
+                    f"{row['drop']:.3f} | {row['drop_rel']:.1f}% |\n"
+                )
+            
+            f.write("\n")
+        
+        # Noise type analysis
+        f.write("\n## Noise Type Analysis (All Modes)\n\n")
+        
+        all_failures = identify_top_failures(df, top_k=100, metric=metric, mode=None)
+        if len(all_failures) > 0:
+            noise_stats = all_failures.groupby("noise").agg({
+                "drop": ["mean", "std", "count"]
+            }).round(4)
+            noise_stats.columns = ["Mean Drop", "Std Drop", "Count"]
+            noise_stats = noise_stats.sort_values("Mean Drop", ascending=False)
+            
+            f.write("| Noise Type | Mean Drop | Std Drop | Count |\n")
+            f.write("|------------|-----------|----------|-------|\n")
+            
+            for noise_type, row in noise_stats.iterrows():
+                f.write(
+                    f"| {noise_type} | {row['Mean Drop']:.4f} | "
+                    f"{row['Std Drop']:.4f} | {int(row['Count'])} |\n"
+                )
+        
+        f.write("\n---\n")
+        f.write("*Generated by NoisySAM Benchmark*\n")
+    
+    logger.info(f"Created failure summary: {summary_path}")
 
 
 def create_failure_summary(
@@ -342,7 +506,7 @@ def create_failure_summary(
 
 def analyze_failure_patterns(df: pd.DataFrame) -> Dict[str, Any]:
     """
-    Analyze patterns in failure cases.
+    Analyze patterns in failure cases, including breakdown by mode.
     
     Returns:
         Dict with analysis results:
@@ -350,6 +514,7 @@ def analyze_failure_patterns(df: pd.DataFrame) -> Dict[str, Any]:
           - worst_model: Model with most failures
           - avg_drop_by_noise: Average drop per noise type
           - avg_drop_by_model: Average drop per model
+          - by_mode: Breakdown of failure patterns per mode
     """
     failures = identify_top_failures(df, top_k=100, metric="dice")
     
@@ -375,5 +540,18 @@ def analyze_failure_patterns(df: pd.DataFrame) -> Dict[str, Any]:
     # Average drop by model
     avg_by_model = failures.groupby("model")["drop"].mean()
     result["avg_drop_by_model"] = avg_by_model.to_dict()
+    
+    # Analysis by mode
+    result["by_mode"] = {}
+    for mode in failures["mode"].unique():
+        mode_failures = failures[failures["mode"] == mode]
+        mode_result = {
+            "count": len(mode_failures),
+            "avg_drop": float(mode_failures["drop"].mean()),
+            "max_drop": float(mode_failures["drop"].max()),
+            "worst_noise": mode_failures.groupby("noise")["drop"].mean().idxmax() if len(mode_failures) > 0 else None,
+            "avg_drop_by_noise": mode_failures.groupby("noise")["drop"].mean().to_dict()
+        }
+        result["by_mode"][mode] = mode_result
     
     return result

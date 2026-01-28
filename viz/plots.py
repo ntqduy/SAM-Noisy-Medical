@@ -1,9 +1,35 @@
 from pathlib import Path
 from turtle import title
 from typing import List, Optional, Dict, Any
+import warnings
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
+
+
+def _safe_corrcoef(x: np.ndarray, y: np.ndarray) -> float:
+    """
+    Compute Pearson correlation safely, handling constant arrays.
+    
+    Returns:
+        Correlation coefficient, or 0.0 if computation fails (e.g., zero stddev)
+    """
+    if len(x) < 2 or len(y) < 2:
+        return 0.0
+    
+    # Check for constant arrays (stddev = 0)
+    if np.std(x) < 1e-10 or np.std(y) < 1e-10:
+        return 0.0
+    
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", RuntimeWarning)
+        try:
+            corr = np.corrcoef(x, y)[0, 1]
+            if np.isnan(corr) or np.isinf(corr):
+                return 0.0
+            return corr
+        except Exception:
+            return 0.0
 
 
 def _get_intensity_scalars_from_cfg(cfg: Dict[str, Any]) -> Dict[str, float]:
@@ -966,8 +992,8 @@ def plot_uncertainty_vs_performance(
         # Scatter plot
         plt.scatter(valid[metric], valid[uncert], alpha=0.3, s=20)
         
-        # Add correlation
-        corr = np.corrcoef(valid[metric], valid[uncert])[0, 1]
+        # Add correlation (safe)
+        corr = _safe_corrcoef(valid[metric].values, valid[uncert].values)
         
         # Trend line
         z = np.polyfit(valid[metric], valid[uncert], 1)
@@ -1038,8 +1064,8 @@ def plot_psnr_vs_performance(
             plt.scatter(subset[qual_metric], subset[metric], alpha=0.5, s=30, 
                        label=noise, color=color)
         
-        # Overall trend line
-        corr = np.corrcoef(valid[qual_metric], valid[metric])[0, 1]
+        # Overall trend line (safe correlation)
+        corr = _safe_corrcoef(valid[qual_metric].values, valid[metric].values)
         z = np.polyfit(valid[qual_metric], valid[metric], 1)
         p = np.poly1d(z)
         x_line = np.linspace(valid[qual_metric].min(), valid[qual_metric].max(), 100)

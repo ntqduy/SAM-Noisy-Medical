@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import Dict, List, Any, Optional
 from datetime import datetime
 import json
+import warnings
 
 import pandas as pd
 import numpy as np
@@ -28,6 +29,31 @@ from reportlab.lib.pagesizes import A4, landscape
 from reportlab.lib.units import cm, inch
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.colors import HexColor, black, white, gray
+
+
+def _safe_corrcoef(x: np.ndarray, y: np.ndarray) -> float:
+    """
+    Compute Pearson correlation safely, handling constant arrays.
+    
+    Returns:
+        Correlation coefficient, or 0.0 if computation fails (e.g., zero stddev)
+    """
+    if len(x) < 2 or len(y) < 2:
+        return 0.0
+    
+    # Check for constant arrays (stddev = 0)
+    if np.std(x) < 1e-10 or np.std(y) < 1e-10:
+        return 0.0
+    
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", RuntimeWarning)
+        try:
+            corr = np.corrcoef(x, y)[0, 1]
+            if np.isnan(corr) or np.isinf(corr):
+                return 0.0
+            return corr
+        except Exception:
+            return 0.0
 from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
 from reportlab.platypus import (
     SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle,
@@ -608,7 +634,7 @@ class PDFReportBuilder:
             for col in available:
                 valid = df[["dice", col]].dropna()
                 if len(valid) > 10:
-                    corr = np.corrcoef(valid["dice"], valid[col])[0, 1]
+                    corr = _safe_corrcoef(valid["dice"].values, valid[col].values)
                     corr_rows.append([col.replace("_", " ").title(), f"{corr:.4f}"])
             
             if len(corr_rows) > 1:

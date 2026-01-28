@@ -20,7 +20,7 @@
   },
   "debug": {
     "enabled": true,
-    "max_samples": 20,
+    "max_samples": 5,
     "noise_types": null,
     "levels": null,
     "max_models": null
@@ -286,6 +286,21 @@
       "L4"
     ],
     "save_noisy_images": true,
+    "noise_viz_samples": 5,
+    "noise_viz_levels": [
+      "L0",
+      "L1",
+      "L2",
+      "L3",
+      "L4"
+    ],
+    "noise_effect_levels": [
+      "L0",
+      "L1",
+      "L2",
+      "L3",
+      "L4"
+    ],
     "save_prob_maps": false
   }
 }
