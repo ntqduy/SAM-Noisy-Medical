@@ -4,7 +4,7 @@ Identifies and visualizes samples with largest performance drops.
 
 Features:
 - Robust path resolution with fallback strategies
-- Multi-level visualization (L0..L4)
+- Multi-level visualization (L0..L4) with actual noisy images
 - Per-mode and per-noise breakdown
 - Detailed debug logging
 - PDF export with proper overlays
@@ -25,7 +25,9 @@ from viz.path_resolver import (
     get_pred_root,
     PathResolutionResult,
     validate_paths_in_df,
-    format_path_validation_report
+    format_path_validation_report,
+    resolve_noisy_image_path,
+    get_noisy_root
 )
 
 # Configure logging
@@ -50,6 +52,66 @@ def _safe_read_mask(path: str) -> Optional[np.ndarray]:
     except Exception as e:
         logger.warning(f"Failed to read mask: {path} - {e}")
         return None
+
+
+def _resolve_image_for_level(
+    cfg: dict,
+    dataset: str,
+    noise: str,
+    level: str,
+    sid: str,
+    noise_seed: int,
+    fallback_img_path: str,
+    log_debug: bool = False
+) -> Optional[np.ndarray]:
+    """
+    Resolve the correct image (clean or noisy) for a given level.
+    
+    Args:
+        cfg: Configuration dictionary
+        dataset: Dataset name
+        noise: Noise type (clean, gaussian, etc.)
+        level: Level (L0, L1, L2, L3, L4)
+        sid: Sample ID
+        noise_seed: Noise seed
+        fallback_img_path: Original image path to use if noisy image not found
+        log_debug: Whether to log debug info
+        
+    Returns:
+        Image array (uint8 grayscale HxW) or None
+    """
+    noisy_root = get_noisy_root(cfg)
+    
+    # For P0/clean/L0, noise is "clean"
+    noise_for_lookup = "clean" if level == "L0" or noise == "clean" else noise
+    
+    noisy_result = resolve_noisy_image_path(
+        noisy_root=noisy_root,
+        dataset=dataset,
+        noise=noise_for_lookup,
+        level=str(level),
+        sid=str(sid),
+        noise_seed=noise_seed,
+        log_debug=log_debug
+    )
+    
+    if noisy_result.found:
+        img = _safe_read_gray(str(noisy_result.path))
+        if img is not None:
+            return img
+    
+    # Fallback to original image
+    if fallback_img_path and Path(fallback_img_path).exists():
+        img = _safe_read_gray(fallback_img_path)
+        if img is not None:
+            if log_debug and level != "L0":
+                logger.warning(
+                    f"[{sid}/{level}] Noisy image not found, using original. "
+                    f"Tried: {noisy_result.search_attempts[0] if noisy_result.search_attempts else 'N/A'}"
+                )
+            return img
+    
+    return None
 
 
 def identify_top_failures(
@@ -408,6 +470,13 @@ def export_failure_cases_multilevel(
                     protocol = "P1"
                     noise_name = noise
                 
+                # Load the correct image for this level (clean or noisy)
+                img_for_level = _resolve_image_for_level(
+                    cfg, dataset, noise_name, lv, sid, noise_seed, img_path
+                )
+                if img_for_level is None:
+                    img_for_level = img  # Fallback to original
+                
                 # Get metrics for this level from df
                 level_rows = df[
                     (df["id"] == sid) & 
@@ -436,23 +505,23 @@ def export_failure_cases_multilevel(
                     log_debug=False
                 )
                 
-                # Column 0: Original image (same for all levels since we don't store noisy)
-                axes[i, 0].imshow(img, cmap="gray")
+                # Column 0: Actual image for this level (clean or noisy)
+                axes[i, 0].imshow(img_for_level, cmap="gray")
                 axes[i, 0].set_title(f"{lv}: Image", fontsize=10)
                 axes[i, 0].set_ylabel(lv, fontsize=12, fontweight='bold')
                 axes[i, 0].axis("off")
                 
-                # Column 1: GT overlay (green)
-                axes[i, 1].imshow(overlay(img, gt, alpha=0.4, color=(0, 255, 0)))
+                # Column 1: GT overlay on the level's image (green)
+                axes[i, 1].imshow(overlay(img_for_level, gt, alpha=0.4, color=(0, 255, 0)))
                 axes[i, 1].set_title(f"{lv}: GT Overlay", fontsize=10)
                 axes[i, 1].axis("off")
                 
-                # Column 2: Prediction overlay (red/blue depending on level)
+                # Column 2: Prediction overlay on the level's image (red/blue depending on level)
                 if pred_result.found:
                     pred = _safe_read_mask(str(pred_result.path))
                     if pred is not None:
                         color = (0, 0, 255) if lv == "L0" else (255, 100, 0)
-                        axes[i, 2].imshow(overlay(img, pred, alpha=0.4, color=color))
+                        axes[i, 2].imshow(overlay(img_for_level, pred, alpha=0.4, color=color))
                         dice_str = f"{dice_val:.3f}" if dice_val else "N/A"
                         axes[i, 2].set_title(f"{lv}: Pred ({metric}={dice_str})", fontsize=10)
                     else:
@@ -501,6 +570,13 @@ def export_failure_cases_multilevel(
                     ]
                     dice_val = level_rows.iloc[0][metric] if len(level_rows) > 0 else None
                     
+                    # Load the correct image for this level
+                    img_for_level = _resolve_image_for_level(
+                        cfg, dataset, noise_name, lv, sid, noise_seed, img_path
+                    )
+                    if img_for_level is None:
+                        img_for_level = img
+                    
                     pred_result = resolve_pred_path(
                         pred_root=pred_root, dataset=dataset, model=model,
                         weight=weight, mode=mode, protocol=protocol,
@@ -508,11 +584,11 @@ def export_failure_cases_multilevel(
                         noise_seed=noise_seed, log_debug=False
                     )
                     
-                    axes2[i, 0].imshow(img, cmap="gray")
+                    axes2[i, 0].imshow(img_for_level, cmap="gray")
                     axes2[i, 0].set_title(f"{lv}: Image")
                     axes2[i, 0].axis("off")
                     
-                    axes2[i, 1].imshow(overlay(img, gt, alpha=0.4, color=(0, 255, 0)))
+                    axes2[i, 1].imshow(overlay(img_for_level, gt, alpha=0.4, color=(0, 255, 0)))
                     axes2[i, 1].set_title(f"{lv}: GT")
                     axes2[i, 1].axis("off")
                     
@@ -520,7 +596,7 @@ def export_failure_cases_multilevel(
                         pred = _safe_read_mask(str(pred_result.path))
                         if pred is not None:
                             color = (0, 0, 255) if lv == "L0" else (255, 100, 0)
-                            axes2[i, 2].imshow(overlay(img, pred, alpha=0.4, color=color))
+                            axes2[i, 2].imshow(overlay(img_for_level, pred, alpha=0.4, color=color))
                             dice_str = f"{dice_val:.3f}" if dice_val else "N/A"
                             axes2[i, 2].set_title(f"{lv}: Pred ({metric}={dice_str})")
                         else:
@@ -637,6 +713,13 @@ def export_random_cases_multilevel(
                     else:
                         protocol, noise_name = "P1", sample_noise
                     
+                    # Load the correct image for this level
+                    img_for_level = _resolve_image_for_level(
+                        cfg, dataset, noise_name, lv, str(sid), noise_seed, img_path
+                    )
+                    if img_for_level is None:
+                        img_for_level = img
+                    
                     pred_result = resolve_pred_path(
                         pred_root=pred_root, dataset=dataset, model=model,
                         weight=weight, mode=mode, protocol=protocol,
@@ -644,18 +727,18 @@ def export_random_cases_multilevel(
                         noise_seed=noise_seed, log_debug=False
                     )
                     
-                    axes[i, 0].imshow(img, cmap="gray")
+                    axes[i, 0].imshow(img_for_level, cmap="gray")
                     axes[i, 0].set_title(f"{lv}: Image")
                     axes[i, 0].axis("off")
                     
-                    axes[i, 1].imshow(overlay(img, gt, alpha=0.4, color=(0, 255, 0)))
+                    axes[i, 1].imshow(overlay(img_for_level, gt, alpha=0.4, color=(0, 255, 0)))
                     axes[i, 1].set_title(f"{lv}: GT")
                     axes[i, 1].axis("off")
                     
                     if pred_result.found:
                         pred = _safe_read_mask(str(pred_result.path))
                         if pred is not None:
-                            axes[i, 2].imshow(overlay(img, pred, alpha=0.4, color=(255, 100, 0)))
+                            axes[i, 2].imshow(overlay(img_for_level, pred, alpha=0.4, color=(255, 100, 0)))
                             axes[i, 2].set_title(f"{lv}: Pred ({noise_name})")
                         else:
                             _create_missing_panel(axes[i, 2], f"{lv}: Pred")

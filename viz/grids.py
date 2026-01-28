@@ -12,7 +12,10 @@ from reportlab.lib.units import cm
 from reportlab.pdfgen import canvas
 
 from viz.overlays import overlay
-from viz.path_resolver import resolve_pred_path, get_pred_root, PathResolutionResult
+from viz.path_resolver import (
+    resolve_pred_path, get_pred_root, PathResolutionResult,
+    resolve_noisy_image_path, get_noisy_root
+)
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -35,6 +38,73 @@ def _safe_read_mask(path: str) -> Optional[np.ndarray]:
     except Exception as e:
         logger.warning(f"Failed to read mask: {path} - {e}")
         return None
+
+
+def _resolve_image_for_level(
+    cfg: dict,
+    dataset: str,
+    noise: str,
+    level: str,
+    sid: str,
+    noise_seed: int,
+    fallback_img_path: str,
+    log_debug: bool = False
+) -> np.ndarray:
+    """
+    Resolve the correct image (clean or noisy) for a given level.
+    
+    For L0/clean: tries noisy_images first, then falls back to original img_path
+    For L1..L4: tries noisy_images/{dataset}/{noise}/{level}/seed{seed}/{sid}.png
+    
+    Args:
+        cfg: Configuration dictionary
+        dataset: Dataset name
+        noise: Noise type (clean, gaussian, etc.)
+        level: Level (L0, L1, L2, L3, L4)
+        sid: Sample ID
+        noise_seed: Noise seed
+        fallback_img_path: Original image path to use if noisy image not found
+        log_debug: Whether to log debug info
+        
+    Returns:
+        Image array (uint8 grayscale HxW)
+    """
+    noisy_root = get_noisy_root(cfg)
+    
+    # For P0/clean/L0, noise is "clean"
+    noise_for_lookup = "clean" if level == "L0" or noise == "clean" else noise
+    
+    noisy_result = resolve_noisy_image_path(
+        noisy_root=noisy_root,
+        dataset=dataset,
+        noise=noise_for_lookup,
+        level=str(level),
+        sid=str(sid),
+        noise_seed=noise_seed,
+        log_debug=log_debug
+    )
+    
+    if noisy_result.found:
+        img = _safe_read_gray(str(noisy_result.path))
+        if img is not None:
+            if log_debug:
+                logger.debug(f"[{sid}/{level}] Using noisy image: {noisy_result.path}")
+            return img
+    
+    # Fallback to original image
+    if fallback_img_path and Path(fallback_img_path).exists():
+        img = _safe_read_gray(fallback_img_path)
+        if img is not None:
+            if log_debug and level != "L0":
+                logger.warning(
+                    f"[{sid}/{level}] Noisy image not found, using original. "
+                    f"Tried: {noisy_result.search_attempts[0] if noisy_result.search_attempts else 'N/A'}"
+                )
+            return img
+    
+    # Return None if all fails
+    logger.warning(f"[{sid}/{level}] No image found (noisy or fallback)")
+    return None
 
 
 def _resolve_pred_for_row(
@@ -105,6 +175,11 @@ def save_preview_pdf(df: pd.DataFrame, cfg: dict, out_pdf: Path, num_samples: in
         r0 = base[base["id"] == sid].iloc[0]
         img = _safe_read_gray(r0["img_path"])
         gt = _safe_read_mask(r0["mask_path"])
+        
+        # Skip if base image or GT is missing
+        if img is None or gt is None:
+            logger.warning(f"[{sid}] Skipping: image or GT not found")
+            continue
 
         # pick a representative noisy row for L2/L4 (first found)
         rows_l2 = df[(df["id"] == sid) & (df["protocol"] == "P1") & (df["level"] == levels[1])]
@@ -118,6 +193,7 @@ def save_preview_pdf(df: pd.DataFrame, cfg: dict, out_pdf: Path, num_samples: in
 
         # load pred masks saved on disk using robust path resolution
         noise_seed = cfg.get("noise_config", {}).get("base_seed", 42)
+        dataset = r0["dataset"]
         
         pred0_result = _resolve_pred_for_row(r0, cfg, sid, noise_seed)
         pred2_result = _resolve_pred_for_row(r2, cfg, sid, noise_seed)
@@ -142,16 +218,29 @@ def save_preview_pdf(df: pd.DataFrame, cfg: dict, out_pdf: Path, num_samples: in
         if pred4 is None:
             pred4 = np.zeros_like(gt)
             logger.warning(f"[{sid}] L4 pred missing")
+        
+        # Load the correct image for each level (clean or noisy)
+        img_l0 = _resolve_image_for_level(cfg, dataset, "clean", "L0", sid, noise_seed, r0["img_path"])
+        img_l2 = _resolve_image_for_level(cfg, dataset, r2["noise"], levels[1], sid, noise_seed, r0["img_path"])
+        img_l4 = _resolve_image_for_level(cfg, dataset, r4["noise"], levels[2], sid, noise_seed, r0["img_path"])
+        
+        # Fallback to original if resolve failed
+        if img_l0 is None:
+            img_l0 = img
+        if img_l2 is None:
+            img_l2 = img
+        if img_l4 is None:
+            img_l4 = img
 
         if y < 3.0*cm:
             c.showPage()
             y = H - 2.0*cm
 
-        draw_panel(img, gt, pred0, f"{sid} — Clean (L0)", 2*cm, y - panel_h, panel_w, panel_h)
+        draw_panel(img_l0, gt, pred0, f"{sid} — Clean (L0)", 2*cm, y - panel_h, panel_w, panel_h)
         y -= (panel_h + 0.3*cm)
-        draw_panel(img, gt, pred2, f"{sid} — Noisy {levels[1]} (example)", 2*cm, y - panel_h, panel_w, panel_h)
+        draw_panel(img_l2, gt, pred2, f"{sid} — Noisy {levels[1]} ({r2['noise']})", 2*cm, y - panel_h, panel_w, panel_h)
         y -= (panel_h + 0.3*cm)
-        draw_panel(img, gt, pred4, f"{sid} — Noisy {levels[2]} (example)", 2*cm, y - panel_h, panel_w, panel_h)
+        draw_panel(img_l4, gt, pred4, f"{sid} — Noisy {levels[2]} ({r4['noise']})", 2*cm, y - panel_h, panel_w, panel_h)
         y -= (panel_h + 0.6*cm)
 
     c.save()
@@ -189,6 +278,7 @@ def save_side_by_side_grid(
         r0 = base.iloc[0]
         img = _safe_read_gray(r0["img_path"])
         gt = _safe_read_mask(r0["mask_path"])
+        dataset = r0["dataset"]
         
         if img is None or gt is None:
             logger.warning(f"[{sid}] Failed to load image/gt, skipping")
@@ -208,6 +298,13 @@ def save_side_by_side_grid(
                 row = rows.iloc[0]
                 protocol = "P1"
                 noise_name = noise
+            
+            # Load the correct image for this level (clean or noisy)
+            img_for_level = _resolve_image_for_level(
+                cfg, dataset, noise_name, lv, sid, noise_seed, r0["img_path"]
+            )
+            if img_for_level is None:
+                img_for_level = img  # Fallback to original
             
             # Load prediction using robust path resolution
             pred_result = resolve_pred_path(
@@ -232,22 +329,22 @@ def save_side_by_side_grid(
                 if pred is None:
                     pred = np.zeros_like(gt)
             
-            # Plot
+            # Plot with correct image for level
             ax_row = axes[i] if len(levels) > 1 else axes
-            ax_row[0].imshow(img, cmap="gray")
+            ax_row[0].imshow(img_for_level, cmap="gray")
             ax_row[0].set_title(f"{lv}: Image")
             ax_row[0].axis("off")
             
-            ax_row[1].imshow(overlay(img, gt, color=(0, 255, 0)))
+            ax_row[1].imshow(overlay(img_for_level, gt, color=(0, 255, 0)))
             ax_row[1].set_title(f"{lv}: GT")
             ax_row[1].axis("off")
             
-            ax_row[2].imshow(overlay(img, pred, color=(255, 0, 0)))
+            ax_row[2].imshow(overlay(img_for_level, pred, color=(255, 0, 0)))
             ax_row[2].set_title(f"{lv}: Pred")
             ax_row[2].axis("off")
             
             # Overlay both
-            combined = overlay(img, gt, alpha=0.3, color=(0, 255, 0))
+            combined = overlay(img_for_level, gt, alpha=0.3, color=(0, 255, 0))
             combined = overlay(combined[:, :, 1], pred, alpha=0.3, color=(255, 0, 0))
             ax_row[3].imshow(combined)
             ax_row[3].set_title(f"{lv}: GT (green) + Pred (red)")
@@ -431,10 +528,14 @@ def save_noise_gallery(
                     
                     if len(rows) > 0:
                         row = rows.iloc[0]
+                        dataset = row["dataset"]
                         
-                        # Load noisy image if stored, else use original
-                        # In current design, we may need to re-apply noise
-                        # For gallery, we just show the prediction overlay
+                        # Load noisy image for this level (uses saved noisy images)
+                        img_for_level = _resolve_image_for_level(
+                            cfg, dataset, noise, lv, sid, noise_seed, r0["img_path"]
+                        )
+                        if img_for_level is None:
+                            img_for_level = img  # Fallback to original
                         
                         # Use robust path resolution
                         pred_result = resolve_pred_path(
@@ -454,12 +555,12 @@ def save_noise_gallery(
                         if pred_result.found:
                             pred = _safe_read_mask(str(pred_result.path))
                             if pred is not None:
-                                vis = overlay(img, pred, alpha=0.4, color=(255, 100, 0))
+                                vis = overlay(img_for_level, pred, alpha=0.4, color=(255, 100, 0))
                                 ax.imshow(vis)
                             else:
-                                ax.imshow(img, cmap="gray")
+                                ax.imshow(img_for_level, cmap="gray")
                         else:
-                            ax.imshow(img, cmap="gray")
+                            ax.imshow(img_for_level, cmap="gray")
                             logger.debug(f"[{sid}/{noise}/{lv}] Pred not found")
                         
                         # Add metrics
@@ -532,6 +633,7 @@ def _create_summary_noise_gallery(
         return
     
     r0 = base.iloc[0]
+    dataset = r0["dataset"]
     
     try:
         img = _safe_read_gray(r0["img_path"])
@@ -552,6 +654,7 @@ def _create_summary_noise_gallery(
         axes = axes.reshape(-1, 1)
     
     display_levels = [lv for lv in levels if lv != "L0"]
+    noise_seed = cfg.get("noise_config", {}).get("base_seed", 42)
     
     for i, noise in enumerate(noise_types):
         for j, lv in enumerate(display_levels):
@@ -567,8 +670,14 @@ def _create_summary_noise_gallery(
             if len(rows) > 0:
                 row = rows.iloc[0]
                 
+                # Load noisy image for this level
+                img_for_level = _resolve_image_for_level(
+                    cfg, dataset, noise, lv, sample_id, noise_seed, r0["img_path"]
+                )
+                if img_for_level is None:
+                    img_for_level = img
+                
                 # Load prediction using robust path resolution
-                noise_seed = cfg.get("noise_config", {}).get("base_seed", 42)
                 pred_result = resolve_pred_path(
                     pred_root=pred_root,
                     dataset=row["dataset"],
@@ -586,12 +695,12 @@ def _create_summary_noise_gallery(
                 if pred_result.found:
                     pred = _safe_read_mask(str(pred_result.path))
                     if pred is not None:
-                        vis = overlay(img, pred, alpha=0.4, color=(255, 100, 0))
+                        vis = overlay(img_for_level, pred, alpha=0.4, color=(255, 100, 0))
                         ax.imshow(vis)
                     else:
-                        ax.imshow(img, cmap="gray")
+                        ax.imshow(img_for_level, cmap="gray")
                 else:
-                    ax.imshow(img, cmap="gray")
+                    ax.imshow(img_for_level, cmap="gray")
                 
                 # Add dice score
                 dice = row.get("dice", None)
@@ -622,13 +731,13 @@ def _create_summary_noise_gallery(
     plt.close()
 
 def _create_summary_noise_gallery_v2(df, cfg, out_dir, sample_id, noise_types, levels, pred_root):
-    # ... (giữ phần load img và gt ban đầu) ...
-    """Create a single summary image showing all noise types and levels."""
+    """Create a single summary image showing all noise types and levels with noisy images."""
     base = df[(df["protocol"] == "P0") & (df["id"] == sample_id)]
     if len(base) == 0:
         return
     
     r0 = base.iloc[0]
+    dataset = r0["dataset"]
     
     try:
         img = _safe_read_gray(r0["img_path"])
@@ -637,7 +746,7 @@ def _create_summary_noise_gallery_v2(df, cfg, out_dir, sample_id, noise_types, l
         return
     
     n_rows = len(noise_types)
-    # Tăng thêm 1 cột cho L0
+    # +1 col for L0
     n_cols = len([lv for lv in levels if lv != "L0"]) + 1 
     
     fig, axes = plt.subplots(n_rows, n_cols, figsize=(3 * n_cols, 3 * n_rows))
@@ -651,7 +760,7 @@ def _create_summary_noise_gallery_v2(df, cfg, out_dir, sample_id, noise_types, l
     noise_seed = cfg.get("noise_config", {}).get("base_seed", 42)
 
     for i, noise in enumerate(noise_types):
-        # Ô đầu tiên của mỗi hàng (Cột 0): Luôn hiển thị ảnh Clean L0
+        # First column (col 0): Always show clean L0 image
         ax_base = axes[i, 0]
         ax_base.imshow(img, cmap="gray")
         if i == 0:
@@ -659,9 +768,9 @@ def _create_summary_noise_gallery_v2(df, cfg, out_dir, sample_id, noise_types, l
         ax_base.set_ylabel(noise, fontsize=10, fontweight='bold', rotation=90)
         ax_base.axis("off")
 
-        # Các ô tiếp theo: Hiển thị ảnh nhiễu theo từng Level
+        # Remaining columns: show noisy images by level
         for j, lv in enumerate(noisy_levels):
-            ax = axes[i, j + 1] # +1 vì cột 0 đã dành cho L0
+            ax = axes[i, j + 1]  # +1 because col 0 is for L0
             
             rows = df[
                 (df["id"] == sample_id) &
@@ -672,6 +781,13 @@ def _create_summary_noise_gallery_v2(df, cfg, out_dir, sample_id, noise_types, l
             
             if len(rows) > 0:
                 row = rows.iloc[0]
+                
+                # Load noisy image for this level
+                img_for_level = _resolve_image_for_level(
+                    cfg, dataset, noise, lv, sample_id, noise_seed, r0["img_path"]
+                )
+                if img_for_level is None:
+                    img_for_level = img
                 
                 # Load prediction using robust path resolution
                 pred_result = resolve_pred_path(
@@ -691,19 +807,19 @@ def _create_summary_noise_gallery_v2(df, cfg, out_dir, sample_id, noise_types, l
                 if pred_result.found:
                     pred = _safe_read_mask(str(pred_result.path))
                     if pred is not None:
-                        vis = overlay(img, pred, alpha=0.4, color=(255, 100, 0))
+                        vis = overlay(img_for_level, pred, alpha=0.4, color=(255, 100, 0))
                         ax.imshow(vis)
                         
-                        # Cải tiến màu sắc cho Dice để làm nổi bật Failure Modes
+                        # Color-coded Dice to highlight failure modes
                         dice = row.get("dice", None)
                         if dice is not None:
                             color = 'green' if dice > 0.8 else 'orange' if dice > 0.4 else 'red'
                             ax.text(0.5, 0.02, f"Dice: {dice:.2f}", transform=ax.transAxes, 
                                     fontsize=8, ha='center', bbox=dict(boxstyle='round', facecolor=color, alpha=0.7))
                     else:
-                        ax.imshow(img, cmap="gray")
+                        ax.imshow(img_for_level, cmap="gray")
                 else:
-                    ax.imshow(img, cmap="gray")
+                    ax.imshow(img_for_level, cmap="gray")
             else:
                 ax.imshow(np.zeros_like(img), cmap="gray")
             

@@ -12,7 +12,10 @@ import matplotlib.pyplot as plt
 import logging
 
 from viz.overlays import overlay
-from viz.path_resolver import resolve_pred_path, get_pred_root
+from viz.path_resolver import (
+    resolve_pred_path, get_pred_root,
+    resolve_noisy_image_path, get_noisy_root
+)
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -35,6 +38,66 @@ def _safe_read_mask(path: str) -> Optional[np.ndarray]:
     except Exception as e:
         logger.warning(f"Failed to read mask: {path} - {e}")
         return None
+
+
+def _resolve_image_for_level(
+    cfg: dict,
+    dataset: str,
+    noise: str,
+    level: str,
+    sid: str,
+    noise_seed: int,
+    fallback_img_path: str,
+    log_debug: bool = False
+) -> Optional[np.ndarray]:
+    """
+    Resolve the correct image (clean or noisy) for a given level.
+    
+    Args:
+        cfg: Configuration dictionary
+        dataset: Dataset name
+        noise: Noise type (clean, gaussian, etc.)
+        level: Level (L0, L1, L2, L3, L4)
+        sid: Sample ID
+        noise_seed: Noise seed
+        fallback_img_path: Original image path to use if noisy image not found
+        log_debug: Whether to log debug info
+        
+    Returns:
+        Image array (uint8 grayscale HxW) or None
+    """
+    noisy_root = get_noisy_root(cfg)
+    
+    # For P0/clean/L0, noise is "clean"
+    noise_for_lookup = "clean" if level == "L0" or noise == "clean" else noise
+    
+    noisy_result = resolve_noisy_image_path(
+        noisy_root=noisy_root,
+        dataset=dataset,
+        noise=noise_for_lookup,
+        level=str(level),
+        sid=str(sid),
+        noise_seed=noise_seed,
+        log_debug=log_debug
+    )
+    
+    if noisy_result.found:
+        img = _safe_read_gray(str(noisy_result.path))
+        if img is not None:
+            return img
+    
+    # Fallback to original image
+    if fallback_img_path and Path(fallback_img_path).exists():
+        img = _safe_read_gray(fallback_img_path)
+        if img is not None:
+            if log_debug and level != "L0":
+                logger.warning(
+                    f"[{sid}/{level}] Noisy image not found, using original. "
+                    f"Tried: {noisy_result.search_attempts[0] if noisy_result.search_attempts else 'N/A'}"
+                )
+            return img
+    
+    return None
 
 
 def identify_top_failures(
@@ -144,11 +207,16 @@ def export_failure_cases(
             logger.warning(f"[{sid}] Mask not found: {mask_path}")
             continue
         
-        # Load image and GT
+        # Load original image and GT
         img = _safe_read_gray(img_path)
         gt = _safe_read_mask(mask_path)
         if img is None or gt is None:
             continue
+        
+        # Load noisy image for L4 level (uses saved noisy images)
+        img_l4 = _resolve_image_for_level(cfg, dataset, noise, "L4", sid, noise_seed, img_path)
+        if img_l4 is None:
+            img_l4 = img  # Fallback to original
         
         # Load predictions using robust path resolution
         pred_l0_result = resolve_pred_path(
@@ -197,9 +265,9 @@ def export_failure_cases(
         # Create visualization
         fig, axes = plt.subplots(1, 4, figsize=(16, 4))
         
-        # Original image
+        # Original clean image
         axes[0].imshow(img, cmap="gray")
-        axes[0].set_title("Original Image")
+        axes[0].set_title("Original Image (Clean)")
         axes[0].axis("off")
         
         # GT overlay
@@ -207,7 +275,7 @@ def export_failure_cases(
         axes[1].set_title("Ground Truth")
         axes[1].axis("off")
         
-        # Clean prediction
+        # Clean prediction on clean image
         if pred_l0 is not None:
             axes[2].imshow(overlay(img, pred_l0, alpha=0.4, color=(0, 0, 255)))
             axes[2].set_title(f"Clean (L0): {metric}={row[f'{metric}_L0']:.3f}")
@@ -216,12 +284,12 @@ def export_failure_cases(
             axes[2].set_title("Clean pred not found")
         axes[2].axis("off")
         
-        # Noisy L4 prediction
+        # Noisy L4 prediction on actual noisy image
         if pred_l4 is not None:
-            axes[3].imshow(overlay(img, pred_l4, alpha=0.4, color=(255, 0, 0)))
+            axes[3].imshow(overlay(img_l4, pred_l4, alpha=0.4, color=(255, 0, 0)))
             axes[3].set_title(f"Noisy L4 ({noise}): {metric}={row[f'{metric}_L4']:.3f}")
         else:
-            axes[3].imshow(img, cmap="gray")
+            axes[3].imshow(img_l4, cmap="gray")
             axes[3].set_title("L4 pred not found")
         axes[3].axis("off")
         

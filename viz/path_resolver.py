@@ -149,23 +149,33 @@ def resolve_pred_path(
 def resolve_noisy_image_path(
     noisy_root: Path,
     dataset: str,
-    model: str,
-    weight: str,
-    mode: str,
-    protocol: str,
     noise: str,
     level: str,
     sid: str,
     noise_seed: int = 42,
     extensions: List[str] = None,
     fallback_glob: bool = True,
-    log_debug: bool = True
+    log_debug: bool = False
 ) -> PathResolutionResult:
     """
     Resolve noisy image path (if saved during experiment).
-    Falls back to original image if noisy images not stored.
     
-    Structure typically: noisy_images/{dataset}/{noise}/{level}/seed{seed}/{sid}.png
+    Structure: noisy_images/{dataset}/{noise}/{level}/seed{seed}/{sid}.png
+    For L0/clean: noisy_images/{dataset}/clean/L0/seed{seed}/{sid}.png
+    
+    Args:
+        noisy_root: Base noisy images directory
+        dataset: Dataset name
+        noise: Noise type (clean, gaussian, etc.)
+        level: Level (L0, L1, L2, L3, L4)
+        sid: Sample ID
+        noise_seed: Noise seed for subfolder
+        extensions: File extensions to try
+        fallback_glob: Whether to use glob search as fallback
+        log_debug: Whether to log debug info
+        
+    Returns:
+        PathResolutionResult with found status and path
     """
     if extensions is None:
         extensions = [".png", ".jpg", ".jpeg"]
@@ -173,21 +183,72 @@ def resolve_noisy_image_path(
     search_attempts = []
     noisy_root = Path(noisy_root)
     
-    # Strategy 1: Noisy images saved separately
+    # Strategy 1: With seed folder (new structure)
     for ext in extensions:
-        path1 = noisy_root / dataset / noise / level / f"seed{noise_seed}" / f"{sid}{ext}"
+        path1 = noisy_root / dataset / noise / str(level) / f"seed{noise_seed}" / f"{sid}{ext}"
         search_attempts.append(str(path1))
         if path1.exists():
-            return PathResolutionResult(True, path1, search_attempts, "noisy_stored")
+            if log_debug:
+                logger.debug(f"[FOUND] Noisy image with seed folder: {path1}")
+            return PathResolutionResult(True, path1, search_attempts, "noisy_with_seed")
     
-    # Strategy 2: Without seed folder
+    # Strategy 2: Without seed folder (old structure)
     for ext in extensions:
-        path2 = noisy_root / dataset / noise / level / f"{sid}{ext}"
+        path2 = noisy_root / dataset / noise / str(level) / f"{sid}{ext}"
         search_attempts.append(str(path2))
         if path2.exists():
-            return PathResolutionResult(True, path2, search_attempts, "noisy_stored_no_seed")
+            if log_debug:
+                logger.debug(f"[FOUND] Noisy image without seed folder: {path2}")
+            return PathResolutionResult(True, path2, search_attempts, "noisy_no_seed")
+    
+    # Strategy 3: Case-insensitive dataset name
+    for ds_variant in [dataset.lower(), dataset.upper(), dataset.title()]:
+        if ds_variant == dataset:
+            continue
+        for ext in extensions:
+            path3 = noisy_root / ds_variant / noise / str(level) / f"seed{noise_seed}" / f"{sid}{ext}"
+            search_attempts.append(str(path3))
+            if path3.exists():
+                if log_debug:
+                    logger.debug(f"[FOUND] Noisy image case variant: {path3}")
+                return PathResolutionResult(True, path3, search_attempts, f"noisy_case_{ds_variant}")
+            
+            path3b = noisy_root / ds_variant / noise / str(level) / f"{sid}{ext}"
+            search_attempts.append(str(path3b))
+            if path3b.exists():
+                if log_debug:
+                    logger.debug(f"[FOUND] Noisy image case variant (no seed): {path3b}")
+                return PathResolutionResult(True, path3b, search_attempts, f"noisy_case_no_seed_{ds_variant}")
+    
+    # Strategy 4: Try any seed folder
+    if fallback_glob:
+        for ext in extensions:
+            pattern = str(noisy_root / dataset / noise / str(level) / "seed*" / f"{sid}{ext}")
+            matches = glob.glob(pattern)
+            if matches:
+                path4 = Path(matches[0])
+                if log_debug:
+                    logger.debug(f"[FOUND] Noisy image any seed folder: {path4}")
+                return PathResolutionResult(True, path4, search_attempts, "noisy_any_seed")
+    
+    # Not found
+    if log_debug:
+        logger.debug(f"[NOT FOUND] Noisy image for {sid} | {noise}/{level}")
+        logger.debug(f"  Top searched paths:\n" + "\n".join(f"    - {p}" for p in search_attempts[:4]))
     
     return PathResolutionResult(False, None, search_attempts, None)
+
+
+def get_noisy_root(cfg: Dict[str, Any]) -> Path:
+    """Get noisy images root directory from config."""
+    exp_name = cfg["exp"]["name"]
+    return Path(cfg["exp"].get("out_root", "outputs")) / exp_name / "noisy_images"
+
+
+def should_save_noisy_images(cfg: Dict[str, Any]) -> bool:
+    """Check if noisy images should be saved based on config."""
+    outputs_cfg = cfg.get("outputs", {})
+    return outputs_cfg.get("save_noisy_images", True)  # Default True for new experiments
 
 
 def build_pred_path_candidates(

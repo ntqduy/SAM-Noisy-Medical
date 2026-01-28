@@ -178,6 +178,7 @@ def run_experiment(cfg: Dict[str, Any]):
 
     figures_dir = ensure_dir(exp_dir / "figures")
     pred_dir = ensure_dir(exp_dir / "pred_masks")
+    noisy_dir = ensure_dir(exp_dir / "noisy_images")  # New: noisy images directory
     meta_dir = ensure_dir(exp_dir / "meta")
     
     # Handle cache_dir - use default "cache" if None or not specified
@@ -204,6 +205,9 @@ def run_experiment(cfg: Dict[str, Any]):
     datasets_cfg = cfg.get("datasets", [])
     models_cfg = cfg.get("models", [])
     outputs_cfg = cfg.get("outputs", {})
+    
+    # Configuration for saving noisy images (default True)
+    save_noisy_images = outputs_cfg.get("save_noisy_images", True)
 
     # Check for report-only mode
     results_csv = exp_dir / "results.csv"
@@ -435,6 +439,20 @@ def run_experiment(cfg: Dict[str, Any]):
                         )
                         from PIL import Image
                         Image.fromarray((pred.astype("uint8") * 255)).save(out_sub / f"{sid}.png")
+                    
+                    # Save noisy image if enabled
+                    # This ensures visualization can show the actual noisy image per level
+                    if save_noisy_images:
+                        from PIL import Image as PILImage
+                        # For P0/clean: save clean image as L0/clean
+                        # For P1/noisy: save noisy image for that noise/level
+                        noisy_sub = ensure_dir(
+                            noisy_dir / dataset_name / noise_name / str(level) / f"seed{noise_seed}"
+                        )
+                        noisy_img_path = noisy_sub / f"{sid}.png"
+                        if not noisy_img_path.exists():  # Avoid overwriting (same image may be processed by multiple models)
+                            # img_noisy is uint8 grayscale HxW
+                            PILImage.fromarray(img_noisy.astype(np.uint8)).save(noisy_img_path)
 
     # Create results DataFrame
     df = pd.DataFrame(all_rows)

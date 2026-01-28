@@ -114,3 +114,4 @@ outputs:
   generate_global_plots: true  # Generate global sensitivity plots
   noise_gallery_samples: 5  # Number of samples for noise gallery visualization
   noise_gallery_levels: ["L0", "L1", "L2", "L3", "L4"]
+  save_noisy_images: true    # New: save noisy images used for inference
