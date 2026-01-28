@@ -32,10 +32,11 @@ from noises.base import NoiseResult
 
 from viz.grids import save_preview_pdf, save_noise_gallery
 from viz.plots import (
-    plot_metric_vs_level, plot_ofat_sensitivity, plot_grid_heatmap,
-    plot_global_sensitivity, plot_summary_heatmap
+    plot_metric_vs_level, plot_model_comparison, plot_ofat_sensitivity, plot_grid_heatmap,
+    plot_global_sensitivity, plot_psnr_vs_performance, plot_stability_summary, plot_summary_heatmap,
+    plot_noise_comparison, plot_uncertainty_vs_performance, create_noise_comparison_grid
 )
-from viz.failure_cases import export_failure_cases
+from viz.failure_cases import analyze_failure_patterns, export_failure_cases
 from reports.pdf_builder import build_report_pdf
 
 
@@ -440,6 +441,7 @@ def run_experiment(cfg: Dict[str, Any]):
     df.to_csv(results_csv, index=False)
 
     # Generate outputs
+    print("\n[INFO] Generating outputs...")
     _generate_outputs(df, cfg, exp_dir, figures_dir, outputs_cfg)
 
 
@@ -473,24 +475,36 @@ def _generate_outputs(
     stability.to_csv(stability_csv, index=False)
 
     # Generate plots
+    print("\n[INFO] Generating plots...")
     plot_paths = []
     if len(df) > 0:
         # Standard plots
         plot_paths += plot_metric_vs_level(df, figures_dir, protocols=["P1"], metrics=["dice", "iou"])
         plot_paths += plot_ofat_sensitivity(df, figures_dir, metrics=["dice"], protocols=["P2a", "P2b"])
         plot_paths += plot_grid_heatmap(df, figures_dir)
+        plot_paths += plot_model_comparison(df, figures_dir, metric="dice")
+        plot_paths += plot_noise_comparison(df, figures_dir, metric="dice")
+        
         
         # Global comparative plots
         plot_paths += plot_global_sensitivity(df, figures_dir, metric="dice")
         plot_paths += plot_summary_heatmap(df, figures_dir, stability)
 
+        # Plot stability
+        plot_paths += plot_stability_summary(stability, figures_dir)
+        plot_paths += plot_uncertainty_vs_performance(
+            df, figures_dir, metric="dice")
+        plot_paths += plot_psnr_vs_performance(
+            df, figures_dir, metric="dice")
+    print(f"[INFO] Generated {len(plot_paths)} plots.")
     # Noise gallery
     try:
         gallery_paths = save_noise_gallery(
             df=df,
             cfg=cfg,
             out_dir=figures_dir / "noise_gallery",
-            num_samples=int(outputs_cfg.get("noise_gallery_samples", 3))
+            num_samples=int(outputs_cfg.get("noise_gallery_samples", 3)),
+            levels=list(outputs_cfg.get("noise_gallery_levels", ["L0", "L2", "L4"])),
         )
         plot_paths += gallery_paths
     except Exception as e:
@@ -508,7 +522,18 @@ def _generate_outputs(
         )
     except Exception as e:
         warnings.warn(f"[WARN] Failed to generate preview PDF: {e}")
-
+    cre_noise_com = outputs_cfg.get("create_noise_comparison_grid", False)
+    if cre_noise_com:
+        try:
+            create_noise_comparison_grid(
+                df=df,
+                cfg=cfg,
+                out_dir=figures_dir / "noise_comparison_grid",
+                num_samples=int(outputs_cfg.get("noise_comparison_grid_samples", 5)),
+                levels=list(outputs_cfg.get("noise_comparison_grid_levels", ["L0", "L1", "L2", "L3", "L4"])),
+            )
+        except Exception as e:
+            warnings.warn(f"[WARN] Failed to generate noise comparison grid: {e}")
     # Failure cases
     failure_dir = ensure_dir(exp_dir / "failure_cases")
     try:
@@ -516,6 +541,9 @@ def _generate_outputs(
             df, cfg, failure_dir, 
             top_k=int(outputs_cfg.get("num_failure_cases", 8))
         )
+        failure_sum = analyze_failure_patterns(df)
+        save_json(failure_dir / "failure_summary.json", failure_sum)
+
     except Exception as e:
         warnings.warn(f"[WARN] Failed to export failure cases: {e}")
         failure_imgs = []

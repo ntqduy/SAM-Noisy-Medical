@@ -53,36 +53,61 @@ class NoiseSpec:
     noise_seed: int = 42
 
 
-def get_level_intensity_scalar(level: str, cfg: dict) -> float:
+def get_level_intensity_scalar(level: str, cfg: Dict[str, Any], *, strict: bool = True) -> float:
     """
-    Get intensity scalar for a level from config.
-    
-    Args:
-        level: Level name (L0..L4)
-        cfg: Config dictionary
-        
-    Returns:
-        Intensity scalar in [0, 1]
+    Get intensity scalar for a level using cfg['levels']['intensity_scalars'] FIRST.
+
+    - Normalizes 'level' (strip, upper).
+    - Accepts numeric levels like 0/1/2/3/4 or "0"/"1"... and converts to "L0".."L4".
+    - If strict=True: raise KeyError when not found (recommended for benchmark correctness).
+      If strict=False: fall back to evenly spaced mapping.
     """
-    intensity_scalars = cfg.get("levels", {}).get("intensity_scalars", {})
-    if level in intensity_scalars:
-        return float(intensity_scalars[level])
-    
-    # Fallback: parse level number
-    level_names = cfg.get("levels", {}).get("names", ["L0", "L1", "L2", "L3", "L4"])
-    if level in level_names:
-        idx = level_names.index(level)
-        return idx / max(1, len(level_names) - 1)
-    
-    # Parse Lx format
-    try:
-        if level.startswith("L"):
-            idx = int(level[1:])
-            return idx / 4.0  # Assume L0-L4
-    except:
-        pass
-    
-    return 0.5  # Default
+    # 1) Normalize level to canonical form "Lx"
+    lv = str(level).strip().upper()
+
+    # Convert "0".."4" to "L0".."L4"
+    if lv.isdigit():
+        lv = f"L{int(lv)}"
+
+    # Convert "LEVEL_1" or "LEVEL1" etc. (optional safety)
+    if lv.startswith("LEVEL"):
+        # keep only trailing digits if present
+        digits = "".join(ch for ch in lv if ch.isdigit())
+        if digits:
+            lv = f"L{int(digits)}"
+
+    levels_cfg = cfg.get("levels", {}) or {}
+    intensity_scalars = levels_cfg.get("intensity_scalars", {}) or {}
+
+    # 2) Primary: use config mapping exactly
+    if lv in intensity_scalars:
+        return float(intensity_scalars[lv])
+
+    # 3) If strict, fail fast (best practice)
+    if strict:
+        raise KeyError(
+            f"Unknown level={level!r} (normalized={lv!r}). "
+            f"Available in cfg['levels']['intensity_scalars']: {sorted(intensity_scalars.keys())}"
+        )
+
+    # 4) Non-strict fallback: evenly spaced based on cfg['levels']['names'] (or default)
+    level_names = levels_cfg.get("names", ["L0", "L1", "L2", "L3", "L4"])
+    level_names = [str(x).strip().upper() for x in level_names]
+    if lv in level_names:
+        idx = level_names.index(lv)
+        denom = max(1, len(level_names) - 1)
+        return idx / denom
+
+    # 5) Last resort: parse Lx
+    if lv.startswith("L"):
+        try:
+            idx = int(lv[1:])
+            return idx / 4.0
+        except ValueError:
+            pass
+
+    return 0.5
+
 
 
 def get_schedule(

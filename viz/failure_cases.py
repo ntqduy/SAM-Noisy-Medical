@@ -1,6 +1,7 @@
 """
 Failure case analysis and export.
 Identifies and visualizes samples with largest performance drops.
+Now uses robust path resolution with fallback strategies.
 """
 from pathlib import Path
 from typing import List, Dict, Any, Optional
@@ -8,19 +9,32 @@ import numpy as np
 import pandas as pd
 from PIL import Image
 import matplotlib.pyplot as plt
+import logging
 
 from viz.overlays import overlay
+from viz.path_resolver import resolve_pred_path, get_pred_root
+
+# Configure logging
+logger = logging.getLogger(__name__)
 
 
-def _safe_read_gray(path: str) -> np.ndarray:
-    """Read image as grayscale."""
-    return np.asarray(Image.open(path).convert("L")).astype(np.uint8)
+def _safe_read_gray(path: str) -> Optional[np.ndarray]:
+    """Read image as grayscale with error handling."""
+    try:
+        return np.asarray(Image.open(path).convert("L")).astype(np.uint8)
+    except Exception as e:
+        logger.warning(f"Failed to read image: {path} - {e}")
+        return None
 
 
-def _safe_read_mask(path: str) -> np.ndarray:
-    """Read mask as binary."""
-    m = np.asarray(Image.open(path).convert("L")).astype(np.uint8)
-    return (m > 0).astype(np.uint8)
+def _safe_read_mask(path: str) -> Optional[np.ndarray]:
+    """Read mask as binary with error handling."""
+    try:
+        m = np.asarray(Image.open(path).convert("L")).astype(np.uint8)
+        return (m > 0).astype(np.uint8)
+    except Exception as e:
+        logger.warning(f"Failed to read mask: {path} - {e}")
+        return None
 
 
 def identify_top_failures(
@@ -103,10 +117,14 @@ def export_failure_cases(
     if len(failures) == 0:
         return []
     
-    exp_name = cfg["exp"]["name"]
-    pred_root = Path(cfg["exp"].get("out_root", "outputs")) / exp_name / "pred_masks"
+    pred_root = get_pred_root(cfg)
+    noise_seed = cfg.get("noise_config", {}).get("base_seed", 42)
+    
+    logger.info(f"Exporting {len(failures)} failure cases to {out_dir}")
+    logger.info(f"Prediction root: {pred_root}")
     
     exported = []
+    not_found_count = 0
     
     for idx, row in failures.iterrows():
         sid = row["id"]
@@ -120,25 +138,61 @@ def export_failure_cases(
         mask_path = row.get("mask_path", "")
         
         if not img_path or not Path(img_path).exists():
+            logger.warning(f"[{sid}] Image not found: {img_path}")
             continue
         if not mask_path or not Path(mask_path).exists():
+            logger.warning(f"[{sid}] Mask not found: {mask_path}")
             continue
         
         # Load image and GT
         img = _safe_read_gray(img_path)
         gt = _safe_read_mask(mask_path)
+        if img is None or gt is None:
+            continue
         
-        # Load predictions
-        pred_l0_path = pred_root / dataset / model / weight / mode / "P0" / "clean" / "L0" / f"{sid}.png"
-        pred_l4_path = pred_root / dataset / model / weight / mode / "P1" / noise / "L4" / f"{sid}.png"
+        # Load predictions using robust path resolution
+        pred_l0_result = resolve_pred_path(
+            pred_root=pred_root,
+            dataset=dataset,
+            model=model,
+            weight=weight,
+            mode=mode,
+            protocol="P0",
+            noise="clean",
+            level="L0",
+            sid=str(sid),
+            noise_seed=noise_seed,
+            log_debug=False
+        )
+        
+        pred_l4_result = resolve_pred_path(
+            pred_root=pred_root,
+            dataset=dataset,
+            model=model,
+            weight=weight,
+            mode=mode,
+            protocol="P1",
+            noise=noise,
+            level="L4",
+            sid=str(sid),
+            noise_seed=noise_seed,
+            log_debug=False
+        )
         
         pred_l0 = None
         pred_l4 = None
         
-        if pred_l0_path.exists():
-            pred_l0 = _safe_read_mask(str(pred_l0_path))
-        if pred_l4_path.exists():
-            pred_l4 = _safe_read_mask(str(pred_l4_path))
+        if pred_l0_result.found:
+            pred_l0 = _safe_read_mask(str(pred_l0_result.path))
+        else:
+            not_found_count += 1
+            logger.warning(f"[{sid}] L0 pred not found. Searched: {pred_l0_result.search_attempts[0] if pred_l0_result.search_attempts else 'N/A'}")
+            
+        if pred_l4_result.found:
+            pred_l4 = _safe_read_mask(str(pred_l4_result.path))
+        else:
+            not_found_count += 1
+            logger.warning(f"[{sid}] L4 pred not found ({noise}). Searched: {pred_l4_result.search_attempts[0] if pred_l4_result.search_attempts else 'N/A'}")
         
         # Create visualization
         fig, axes = plt.subplots(1, 4, figsize=(16, 4))
@@ -183,13 +237,20 @@ def export_failure_cases(
         
         plt.tight_layout()
         
-        # Save
-        out_path = out_dir / f"failure_{idx:02d}_{sid}_{noise}.png"
-        plt.savefig(out_path, dpi=150, bbox_inches="tight")
+        # Save as PNG and PDF
+        out_path_png = out_dir / f"failure_{idx:03d}_{sid}_{noise}.png"
+        out_path_pdf = out_dir / f"failure_{idx:03d}_{sid}_{noise}.pdf"
+        
+        plt.savefig(out_path_png, dpi=150, bbox_inches="tight", facecolor='white')
+        plt.savefig(out_path_pdf, dpi=150, bbox_inches="tight", facecolor='white')
         plt.close()
         
-        exported.append(str(out_path))
+        exported.append(str(out_path_png))
     
+    if not_found_count > 0:
+        logger.warning(f"Total predictions not found: {not_found_count}")
+    
+    logger.info(f"Exported {len(exported)} failure case visualizations")
     return exported
 
 

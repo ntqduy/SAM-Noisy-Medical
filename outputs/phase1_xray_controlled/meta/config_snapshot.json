@@ -6,13 +6,13 @@
   "device": "cuda",
   "seed": 42,
   "limit_n": 0,
-  "dry_run": true,
+  "dry_run": false,
   "verbose": true,
   "phase": 1,
   "cache": {
     "enabled": true,
     "cache_dir": null,
-    "clear_on_start": false,
+    "clear_on_start": true,
     "use_cache": true,
     "overwrite_cache": false,
     "only_report": false,
@@ -20,10 +20,8 @@
   },
   "debug": {
     "enabled": false,
-    "max_samples": 2,
-    "noise_types": [
-      "gaussian"
-    ],
+    "max_samples": null,
+    "noise_types": null,
     "levels": null,
     "max_models": null
   },

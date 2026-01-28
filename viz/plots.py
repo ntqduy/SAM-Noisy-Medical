@@ -1,4 +1,5 @@
 from pathlib import Path
+from turtle import title
 from typing import List, Optional
 import pandas as pd
 import numpy as np
@@ -7,6 +8,12 @@ import matplotlib.pyplot as plt
 
 def plot_metric_vs_level(df: pd.DataFrame, out_dir: Path, protocols: List[str], metrics: List[str]) -> List[str]:
     out_dir.mkdir(parents=True, exist_ok=True)
+    out_dir_png = out_dir / "plot_png"
+    out_dir_png.mkdir(parents=True, exist_ok=True)
+
+    out_dir_pdf = out_dir / "plot_pdf"
+    out_dir_pdf.mkdir(parents=True, exist_ok=True)
+
     paths = []
     sub = df[df["protocol"].isin(protocols)].copy()
     if len(sub) == 0:
@@ -31,19 +38,34 @@ def plot_metric_vs_level(df: pd.DataFrame, out_dir: Path, protocols: List[str], 
 
             plt.figure()
             plt.plot(g["level"].astype(str), g[metric].values, marker="o")
-            plt.title(f"{metric} vs level — {dataset} | {model}/{weight} | {mode} | {protocol} | {noise}")
+            # Set title with size 9 and padding 6
+            plt.title(
+                f"{metric} vs level — {dataset} | {model}/{weight} | {mode} | {protocol} | {noise}",
+                fontsize=9,   # nhỏ hơn (thử 8–10)
+                pad=6
+            )
             plt.xlabel("Level")
             plt.ylabel(metric)
-            out = out_dir / f"{metric}_vs_level__{dataset}__{model}-{weight}__{mode}__{protocol}__{noise}.png"
+            out_png = out_dir_png / f"{metric}_vs_level_{dataset}_{model}-{weight}_{mode}_{protocol}_{noise}.png"
+            out_pdf = out_dir_pdf / f"{metric}_vs_level_{dataset}_{model}-{weight}_{mode}_{protocol}_{noise}.pdf"
             plt.tight_layout()
-            plt.savefig(out, dpi=160)
+            plt.savefig(out_png, dpi=160)
+            plt.savefig(out_pdf, bbox_inches="tight")
+
             plt.close()
-            paths.append(str(out))
+            paths.append(str(out_png))
+            paths.append(str(out_pdf))
     return paths
 
 
 def plot_ofat_sensitivity(df: pd.DataFrame, out_dir: Path, metrics: List[str], protocols: List[str]) -> List[str]:
     out_dir.mkdir(parents=True, exist_ok=True)
+
+    out_dir_png = out_dir / "plot_png"
+    out_dir_png.mkdir(parents=True, exist_ok=True)
+    out_dir_pdf = out_dir / "plot_pdf"
+    out_dir_pdf.mkdir(parents=True, exist_ok=True)
+
     paths = []
     sub = df[df["protocol"].isin(protocols)].copy()
     if len(sub) == 0:
@@ -66,14 +88,18 @@ def plot_ofat_sensitivity(df: pd.DataFrame, out_dir: Path, metrics: List[str], p
 
             plt.figure()
             plt.plot(g["level"].astype(str), g[metric].values, marker="o")
-            plt.title(f"OFAT {protocol}: {metric} — {dataset} | {model}/{weight} | {mode} | {noise}")
+            title = f"OFAT {protocol}: {metric} — {dataset}\n{model}/{weight} | {mode} | {noise}"
+            plt.title(title, fontsize=9, pad=6)
             plt.xlabel("Level (sweep)")
             plt.ylabel(metric)
-            out = out_dir / f"OFAT_{protocol}__{metric}__{dataset}__{model}-{weight}__{mode}__{noise}.png"
+            out_png = out_dir_png / f"OFAT_{protocol}_{metric}_{dataset}_{model}-{weight}_{mode}_{noise}.png"
+            out_pdf = out_dir_pdf / f"OFAT_{protocol}_{metric}_{dataset}_{model}-{weight}_{mode}_{noise}.pdf"
             plt.tight_layout()
-            plt.savefig(out, dpi=160)
+            plt.savefig(out_png, dpi=160)
+            plt.savefig(out_pdf, bbox_inches="tight")
             plt.close()
-            paths.append(str(out))
+            paths.append(str(out_png))
+            paths.append(str(out_pdf))
     return paths
 
 
@@ -82,6 +108,12 @@ def plot_grid_heatmap(df: pd.DataFrame, out_dir: Path) -> List[str]:
     Plot P3 grid results as heatmaps (p × severity).
     """
     out_dir.mkdir(parents=True, exist_ok=True)
+
+    out_dir_png = out_dir / "plot_png"
+    out_dir_png.mkdir(parents=True, exist_ok=True)
+    out_dir_pdf = out_dir / "plot_pdf"
+    out_dir_pdf.mkdir(parents=True, exist_ok=True)
+
     paths = []
     sub = df[df["protocol"] == "P3"].copy()
     if len(sub) == 0:
@@ -136,11 +168,14 @@ def plot_grid_heatmap(df: pd.DataFrame, out_dir: Path) -> List[str]:
                 if not np.isnan(val):
                     plt.text(j, i, f"{val:.2f}", ha="center", va="center", fontsize=9)
         
-        out = out_dir / f"P3_grid__{dataset}__{model}-{weight}__{mode}__{noise}.png"
+        out_png = out_dir_png / f"P3_grid_{dataset}_{model}-{weight}_{mode}_{noise}.png"
+        out_pdf = out_dir_pdf / f"P3_grid_{dataset}_{model}-{weight}_{mode}_{noise}.pdf"        
         plt.tight_layout()
-        plt.savefig(out, dpi=160)
+        plt.savefig(out_png, dpi=160)
+        plt.savefig(out_pdf, bbox_inches="tight")
         plt.close()
-        paths.append(str(out))
+        paths.append(str(out_png))
+        paths.append(str(out_pdf))
     
     return paths
 
@@ -150,6 +185,11 @@ def plot_model_comparison(df: pd.DataFrame, out_dir: Path, metric: str = "dice")
     Plot model comparison across noise types and levels.
     """
     out_dir.mkdir(parents=True, exist_ok=True)
+    out_dir_png = out_dir / "plot_png"
+    out_dir_png.mkdir(parents=True, exist_ok=True)
+    out_dir_pdf = out_dir / "plot_pdf"
+    out_dir_pdf.mkdir(parents=True, exist_ok=True)
+
     paths = []
     
     sub = df[df["protocol"] == "P1"].copy()
@@ -181,11 +221,14 @@ def plot_model_comparison(df: pd.DataFrame, out_dir: Path, metric: str = "dice")
         plt.legend(bbox_to_anchor=(1.05, 1), loc="upper left")
         plt.grid(True, alpha=0.3)
         
-        out = out_dir / f"model_comparison__{metric}__{dataset}__{noise}.png"
+        out_png = out_dir_png / f"model_comparison_{metric}_{dataset}_{noise}.png"
+        out_pdf = out_dir_pdf / f"model_comparison_{metric}_{dataset}_{noise}.pdf"
         plt.tight_layout()
-        plt.savefig(out, dpi=160)
+        plt.savefig(out_png, dpi=160)
+        plt.savefig(out_pdf, bbox_inches="tight")
         plt.close()
-        paths.append(str(out))
+        paths.append(str(out_png))
+        paths.append(str(out_pdf))
     
     return paths
 
@@ -195,6 +238,11 @@ def plot_noise_comparison(df: pd.DataFrame, out_dir: Path, metric: str = "dice")
     Plot noise type comparison for each model.
     """
     out_dir.mkdir(parents=True, exist_ok=True)
+    out_dir_png = out_dir / "plot_png"
+    out_dir_png.mkdir(parents=True, exist_ok=True)
+    out_dir_pdf = out_dir / "plot_pdf"
+    out_dir_pdf.mkdir(parents=True, exist_ok=True)
+
     paths = []
     
     sub = df[df["protocol"] == "P1"].copy()
@@ -225,11 +273,14 @@ def plot_noise_comparison(df: pd.DataFrame, out_dir: Path, metric: str = "dice")
         plt.legend(bbox_to_anchor=(1.05, 1), loc="upper left")
         plt.grid(True, alpha=0.3)
         
-        out = out_dir / f"noise_comparison__{metric}__{dataset}__{model}-{weight}.png"
+        out_png = out_dir_png / f"noise_comparison_{metric}_{dataset}_{model}-{weight}.png"
+        out_pdf = out_dir_pdf / f"noise_comparison_{metric}_{dataset}_{model}-{weight}.pdf"
         plt.tight_layout()
-        plt.savefig(out, dpi=160)
+        plt.savefig(out_png, dpi=160)
+        plt.savefig(out_pdf, bbox_inches="tight")
         plt.close()
-        paths.append(str(out))
+        paths.append(str(out_png))
+        paths.append(str(out_pdf))
     
     return paths
 
@@ -239,6 +290,12 @@ def plot_stability_summary(stability_df: pd.DataFrame, out_dir: Path) -> List[st
     Plot stability summary (perf_drop distribution).
     """
     out_dir.mkdir(parents=True, exist_ok=True)
+
+    out_dir_png = out_dir / "plot_png"
+    out_dir_png.mkdir(parents=True, exist_ok=True)
+    out_dir_pdf = out_dir / "plot_pdf"
+    out_dir_pdf.mkdir(parents=True, exist_ok=True)
+
     paths = []
     
     if "perf_drop_mean" not in stability_df.columns:
@@ -269,11 +326,14 @@ def plot_stability_summary(stability_df: pd.DataFrame, out_dir: Path) -> List[st
             else:
                 bar.set_color("green")
         
-        out = out_dir / f"stability_perf_drop__{dataset}__{model}-{weight}.png"
+        out_png = out_dir_png / f"stability_perf_drop_{dataset}_{model}-{weight}.png"
+        out_pdf = out_dir_pdf / f"stability_perf_drop_{dataset}_{model}-{weight}.pdf"
         plt.tight_layout()
-        plt.savefig(out, dpi=160)
+        plt.savefig(out_png, dpi=160)
+        plt.savefig(out_pdf, bbox_inches="tight")
         plt.close()
-        paths.append(str(out))
+        paths.append(str(out_png))
+        paths.append(str(out_pdf))
     
     return paths
 
@@ -303,6 +363,11 @@ def plot_global_sensitivity(
     """
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
+
+    out_dir_png = out_dir / "plot_png"
+    out_dir_png.mkdir(parents=True, exist_ok=True)
+    out_dir_pdf = out_dir / "plot_pdf"
+    out_dir_pdf.mkdir(parents=True, exist_ok=True)
     paths = []
     
     if protocols is None:
@@ -356,11 +421,14 @@ def plot_global_sensitivity(
                     color = 'white' if val < 0.5 else 'black'
                     plt.text(j, i, f"{val:.2f}", ha="center", va="center", fontsize=8, color=color)
         
-        out = out_dir / f"global_sensitivity_heatmap__{dataset}__{model}-{weight}__{mode}.png"
+        out_png = out_dir_png / f"global_sensitivity_heatmap_{dataset}_{model}-{weight}_{mode}.png"
+        out_pdf = out_dir_pdf / f"global_sensitivity_heatmap_{dataset}_{model}-{weight}_{mode}.pdf"
         plt.tight_layout()
-        plt.savefig(out, dpi=160)
+        plt.savefig(out_png, dpi=160)
+        plt.savefig(out_pdf, bbox_inches="tight")
         plt.close()
-        paths.append(str(out))
+        paths.append(str(out_png))
+        paths.append(str(out_pdf))
     
     # 2. Sensitivity curves: metric vs intensity_scalar
     if "intensity_scalar" in sub.columns:
@@ -385,11 +453,14 @@ def plot_global_sensitivity(
                 baseline_val = g[f"{metric}_baseline"].iloc[0]
                 plt.axhline(y=baseline_val, color='gray', linestyle='--', label='Baseline (P0)')
             
-            out = out_dir / f"sensitivity_curves__{dataset}__{model}-{weight}__{mode}.png"
+            out_png = out_dir_png / f"sensitivity_curves_{dataset}_{model}-{weight}_{mode}.png"
+            out_pdf = out_dir_pdf / f"sensitivity_curves_{dataset}_{model}-{weight}_{mode}.pdf"
             plt.tight_layout()
-            plt.savefig(out, dpi=160)
+            plt.savefig(out_png, dpi=160)
+            plt.savefig(out_pdf, bbox_inches="tight")
             plt.close()
-            paths.append(str(out))
+            paths.append(str(out_png))
+            paths.append(str(out_pdf))
     
     # 3. Impact ranking (sorted bar chart)
     impact = sub.groupby(["dataset", "model", "weight", "mode", "noise"]).agg({
@@ -417,11 +488,16 @@ def plot_global_sensitivity(
         for i, (val, std) in enumerate(zip(g[f"{metric}_mean"].values, g[f"{metric}_std"].values)):
             plt.text(val + 0.02, i, f"{val:.3f}±{std:.3f}", va='center', fontsize=8)
         
-        out = out_dir / f"impact_ranking__{dataset}__{model}-{weight}__{mode}.png"
+        out_png = out_dir_png / f"impact_ranking_{dataset}_{model}-{weight}_{mode}.png"
+        out_pdf = out_dir_pdf / f"impact_ranking_{dataset}_{model}-{weight}_{mode}.pdf"
+
         plt.tight_layout()
-        plt.savefig(out, dpi=160)
+        plt.savefig(out_png, dpi=160)
+        plt.savefig(out_pdf, bbox_inches="tight")
+        
         plt.close()
-        paths.append(str(out))
+        paths.append(str(out_png))
+        paths.append(str(out_pdf))
     
     return paths
 
@@ -451,6 +527,12 @@ def plot_summary_heatmap(
     """
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
+
+    out_dir_png = out_dir / "plot_png"
+    out_dir_png.mkdir(parents=True, exist_ok=True)
+    out_dir_pdf = out_dir / "plot_pdf"
+    out_dir_pdf.mkdir(parents=True, exist_ok=True)
+
     paths = []
     
     if metrics is None:
@@ -494,11 +576,15 @@ def plot_summary_heatmap(
                         color = 'white' if val < 0.5 else 'black'
                         plt.text(j, i, f"{val:.2f}", ha="center", va="center", fontsize=9, color=color)
             
-            out = out_dir / f"summary_heatmap_{metric}__{dataset}.png"
+            out_png = out_dir_png / f"summary_heatmap_{metric}_{dataset}.png"
+            out_pdf = out_dir_pdf / f"summary_heatmap_{metric}_{dataset}.pdf"
+            
             plt.tight_layout()
-            plt.savefig(out, dpi=160)
+            plt.savefig(out_png, dpi=160)
+            plt.savefig(out_pdf, bbox_inches="tight")
             plt.close()
-            paths.append(str(out))
+            paths.append(str(out_png))
+            paths.append(str(out_pdf))
     
     # 2. Stability heatmap (if provided)
     if stability_df is not None and len(stability_df) > 0:
@@ -550,11 +636,14 @@ def plot_summary_heatmap(
                         if not np.isnan(val):
                             plt.text(j, i, f"{val:.3f}", ha="center", va="center", fontsize=8)
                 
-                out = out_dir / f"stability_heatmap_{stab_metric}__{dataset}.png"
+                out_png = out_dir_png / f"stability_heatmap_{stab_metric}_{dataset}.png"
+                out_pdf = out_dir_pdf / f"stability_heatmap_{stab_metric}_{dataset}.pdf"
                 plt.tight_layout()
-                plt.savefig(out, dpi=160)
+                plt.savefig(out_png, dpi=160)
+                plt.savefig(out_pdf, bbox_inches="tight")
                 plt.close()
-                paths.append(str(out))
+                paths.append(str(out_png))
+                paths.append(str(out_pdf))
     
     return paths
 
@@ -581,6 +670,11 @@ def plot_uncertainty_vs_performance(
     """
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
+    out_dir_png = out_dir / "plot_png"
+    out_dir_png.mkdir(parents=True, exist_ok=True)
+    out_dir_pdf = out_dir / "plot_pdf"
+    out_dir_pdf.mkdir(parents=True, exist_ok=True)
+
     paths = []
     
     uncertainty_cols = ["mean_confidence", "mean_entropy", "boundary_entropy", 
@@ -615,11 +709,14 @@ def plot_uncertainty_vs_performance(
         plt.legend()
         plt.grid(True, alpha=0.3)
         
-        out = out_dir / f"uncertainty_{uncert}_vs_{metric}.png"
+        out_png = out_dir_png / f"uncertainty_{uncert}_vs_{metric}.png"
+        out_pdf = out_dir_pdf / f"uncertainty_{uncert}_vs_{metric}.pdf"
         plt.tight_layout()
-        plt.savefig(out, dpi=160)
+        plt.savefig(out_png, dpi=160)
+        plt.savefig(out_pdf, bbox_inches="tight")
         plt.close()
-        paths.append(str(out))
+        paths.append(str(out_png))
+        paths.append(str(out_pdf))
     
     return paths
 
@@ -642,6 +739,12 @@ def plot_psnr_vs_performance(
     """
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
+
+    out_dir_png = out_dir / "plot_png"
+    out_dir_png.mkdir(parents=True, exist_ok=True)
+    out_dir_pdf = out_dir / "plot_pdf"
+    out_dir_pdf.mkdir(parents=True, exist_ok=True)
+
     paths = []
     
     for qual_metric in ["psnr", "ssim"]:
@@ -676,10 +779,13 @@ def plot_psnr_vs_performance(
         plt.legend(bbox_to_anchor=(1.05, 1), loc="upper left")
         plt.grid(True, alpha=0.3)
         
-        out = out_dir / f"{qual_metric}_vs_{metric}.png"
+        out_png = out_dir_png / f"{qual_metric}_vs_{metric}.png"
+        out_pdf = out_dir_pdf / f"{qual_metric}_vs_{metric}.pdf"
         plt.tight_layout()
-        plt.savefig(out, dpi=160)
+        plt.savefig(out_png, dpi=160)
+        plt.savefig(out_pdf, bbox_inches="tight")
         plt.close()
-        paths.append(str(out))
+        paths.append(str(out_png))
+        paths.append(str(out_pdf))
     
     return paths

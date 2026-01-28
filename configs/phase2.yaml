@@ -36,8 +36,8 @@ datasets:
   - name: "montgomery"
     adapter: "ImageMaskFolderAdapter"
     root: "./data/montgomery"
-    image_dir: "images"
-    mask_dir: "masks"
+    image_dir: "img"
+    mask_dir: "mask"
     image_exts: [".png", ".jpg"]
     mask_exts: [".png"]
     mask:

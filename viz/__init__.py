@@ -4,6 +4,8 @@ Extended for AIO25 NoisySAM project with:
   - Noise gallery visualizations
   - Global sensitivity heatmaps
   - PSNR/uncertainty correlation plots
+  - Robust path resolution for predictions
+  - Multi-level failure case visualization
 """
 from viz.overlays import overlay
 from viz.grids import save_preview_pdf, save_side_by_side_grid, save_noise_gallery
@@ -25,6 +27,23 @@ from viz.failure_cases import (
     create_failure_summary,
     analyze_failure_patterns,
 )
+from viz.path_resolver import (
+    resolve_pred_path,
+    get_pred_root,
+    validate_paths_in_df,
+    format_path_validation_report,
+    PathResolutionResult,
+)
+
+# Import enhanced failure cases module
+try:
+    from viz.failure_cases_v2 import (
+        export_failure_cases_multilevel,
+        export_random_cases_multilevel,
+    )
+except ImportError:
+    export_failure_cases_multilevel = None
+    export_random_cases_multilevel = None
 
 __all__ = [
     "overlay",
@@ -43,6 +62,13 @@ __all__ = [
     "plot_psnr_vs_performance",
     "identify_top_failures",
     "export_failure_cases",
+    "export_failure_cases_multilevel",
+    "export_random_cases_multilevel",
     "create_failure_summary",
     "analyze_failure_patterns",
+    "resolve_pred_path",
+    "get_pred_root",
+    "validate_paths_in_df",
+    "format_path_validation_report",
+    "PathResolutionResult",
 ]
