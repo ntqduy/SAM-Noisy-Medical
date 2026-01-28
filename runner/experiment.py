@@ -524,6 +524,7 @@ def _generate_outputs(
             df, figures_dir, metric="dice")
     print(f"[INFO] Generated {len(plot_paths)} plots.")
     # Noise gallery
+    gallery_paths = []
     try:
         gallery_paths = save_noise_gallery(
             df=df,
@@ -537,6 +538,7 @@ def _generate_outputs(
         warnings.warn(f"[WARN] Failed to generate noise gallery: {e}")
 
     # NEW: Noise visualization gallery (overlay only at L0, noisy images for L1-L4)
+    noise_viz_paths = []
     try:
         noise_viz_paths = create_noise_visualization_gallery(
             df=df,
@@ -622,6 +624,10 @@ def _generate_outputs(
 
     # Build final report PDF
     try:
+        # Separate global comparison plots from per-noise plots for better organization
+        global_plot_paths = [p for p in plot_paths if any(kw in p.lower() for kw in 
+            ["heatmap", "ranking", "sensitivity_curve", "mode_comparison", "global"])]
+        
         report_pdf = build_report_pdf(
             df=df,
             agg_df=agg,
@@ -630,6 +636,8 @@ def _generate_outputs(
             exp_dir=exp_dir,
             figure_paths=plot_paths,
             failure_paths=failure_imgs,
+            noise_gallery_paths=gallery_paths + noise_viz_paths,
+            global_plot_paths=global_plot_paths,
         )
     except Exception as e:
         warnings.warn(f"[WARN] Failed to build report PDF: {e}")

@@ -174,6 +174,9 @@ class PDFReportBuilder:
         
         # Quantitative Results
         story.extend(self._build_quantitative_section(agg_df))
+        
+        # Per-noise-type metrics by level (NEW)
+        story.extend(self._build_per_noise_metrics_section(df))
         story.append(PageBreak())
         
         # Stability Analysis (extended)
@@ -189,6 +192,9 @@ class PDFReportBuilder:
         # Global Comparative Plots
         if global_plot_paths:
             story.extend(self._build_global_plots_section(global_plot_paths))
+        
+        # Mode Comparison Plots (automatic vs prompt_bbox)
+        story.extend(self._build_mode_comparison_section(figure_paths))
         
         # Sensitivity Plots
         story.extend(self._build_plots_section(figure_paths))
@@ -427,6 +433,125 @@ class PDFReportBuilder:
                     ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
                 ]))
                 story.append(result_table)
+        
+        return story
+    
+    def _build_per_noise_metrics_section(self, df: pd.DataFrame) -> List:
+        """Build per-noise-type metrics table by level.
+        
+        Shows Dice, IoU for each noise type across all levels (L0-L4).
+        """
+        story = []
+        
+        story.append(PageBreak())
+        story.append(Paragraph("Per-Noise-Type Metrics by Level", self.styles['SectionTitle']))
+        
+        if len(df) == 0:
+            story.append(Paragraph("No data available.", self.styles['MyBodyText']))
+            return story
+        
+        story.append(Paragraph(
+            "This section shows the mean Dice and IoU scores for each noise type at each severity level. "
+            "L0 represents clean (baseline) images, while L1-L4 represent increasing noise severity.",
+            self.styles['MyBodyText']
+        ))
+        story.append(Spacer(1, 0.3*cm))
+        
+        # Get unique noise types
+        noise_types = df["noise"].dropna().unique().tolist()
+        noise_types = [n for n in noise_types if n != "clean"]
+        
+        # Get unique levels  
+        levels = sorted(df["level"].dropna().unique().tolist())
+        
+        if not noise_types or not levels:
+            story.append(Paragraph("No noise data available for breakdown.", self.styles['MyBodyText']))
+            return story
+        
+        # Process each mode separately
+        modes = df["mode"].dropna().unique().tolist()
+        
+        for mode in modes:
+            story.append(Spacer(1, 0.3*cm))
+            story.append(Paragraph(f"Mode: {mode}", self.styles['SubSection']))
+            
+            mode_df = df[df["mode"] == mode].copy()
+            
+            # Table: Noise Type | L0 Dice | L1 Dice | L2 Dice | L3 Dice | L4 Dice
+            # Then a second table for IoU
+            
+            # DICE TABLE
+            story.append(Paragraph("Dice Scores by Noise Type and Level", self.styles['SmallText']))
+            header_dice = ["Noise Type"] + [f"{lv}" for lv in levels]
+            rows_dice = [header_dice]
+            
+            for noise in noise_types:
+                row_data = [noise]
+                for level in levels:
+                    if level == "L0":
+                        # L0 is always clean from P0
+                        subset = mode_df[(mode_df["protocol"] == "P0")]
+                    else:
+                        subset = mode_df[(mode_df["noise"] == noise) & (mode_df["level"] == level)]
+                    
+                    if len(subset) > 0 and "dice" in subset.columns:
+                        mean_val = subset["dice"].mean()
+                        row_data.append(f"{mean_val:.3f}")
+                    else:
+                        row_data.append("-")
+                rows_dice.append(row_data)
+            
+            n_cols = len(header_dice)
+            col_widths_dice = [3*cm] + [1.8*cm] * (n_cols - 1)
+            
+            dice_table = Table(rows_dice, colWidths=col_widths_dice)
+            dice_table.setStyle(TableStyle([
+                ('BACKGROUND', (0, 0), (-1, 0), HexColor('#c6f6d5')),
+                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                ('FONTSIZE', (0, 0), (-1, -1), 8),
+                ('GRID', (0, 0), (-1, -1), 0.5, colors.gray),
+                ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+                ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+                ('BOTTOMPADDING', (0, 0), (-1, -1), 3),
+                ('TOPPADDING', (0, 0), (-1, -1), 3),
+            ]))
+            story.append(dice_table)
+            story.append(Spacer(1, 0.3*cm))
+            
+            # IoU TABLE
+            story.append(Paragraph("IoU Scores by Noise Type and Level", self.styles['SmallText']))
+            header_iou = ["Noise Type"] + [f"{lv}" for lv in levels]
+            rows_iou = [header_iou]
+            
+            for noise in noise_types:
+                row_data = [noise]
+                for level in levels:
+                    if level == "L0":
+                        subset = mode_df[(mode_df["protocol"] == "P0")]
+                    else:
+                        subset = mode_df[(mode_df["noise"] == noise) & (mode_df["level"] == level)]
+                    
+                    if len(subset) > 0 and "iou" in subset.columns:
+                        mean_val = subset["iou"].mean()
+                        row_data.append(f"{mean_val:.3f}")
+                    else:
+                        row_data.append("-")
+                rows_iou.append(row_data)
+            
+            col_widths_iou = [3*cm] + [1.8*cm] * (n_cols - 1)
+            
+            iou_table = Table(rows_iou, colWidths=col_widths_iou)
+            iou_table.setStyle(TableStyle([
+                ('BACKGROUND', (0, 0), (-1, 0), HexColor('#bee3f8')),
+                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                ('FONTSIZE', (0, 0), (-1, -1), 8),
+                ('GRID', (0, 0), (-1, -1), 0.5, colors.gray),
+                ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+                ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+                ('BOTTOMPADDING', (0, 0), (-1, -1), 3),
+                ('TOPPADDING', (0, 0), (-1, -1), 3),
+            ]))
+            story.append(iou_table)
         
         return story
     
@@ -730,6 +855,43 @@ class PDFReportBuilder:
         add_plot_group(rankings, "Impact Rankings")
         add_plot_group(curves, "Sensitivity Curves")
         add_plot_group(others, "Additional Plots")
+        
+        return story
+    
+    def _build_mode_comparison_section(self, figure_paths: List[str]) -> List:
+        """Build mode comparison (automatic vs prompt_bbox) plots section."""
+        story = []
+        
+        # Filter for mode comparison plots
+        mode_plots = [p for p in figure_paths if self._is_valid_image(p) and 
+                      any(kw in p.lower() for kw in ["mode_comparison", "by_mode", "automatic_vs", "prompt_bbox"])]
+        
+        if not mode_plots:
+            return story
+        
+        story.append(PageBreak())
+        story.append(Paragraph("Mode Comparison Analysis", self.styles['SectionTitle']))
+        
+        story.append(Paragraph(
+            "Comparison of segmentation performance between automatic mode (no prompts) "
+            "and prompt-guided mode (bounding box prompts). These plots help understand "
+            "how prompt guidance affects model robustness to noise.",
+            self.styles['MyBodyText']
+        ))
+        story.append(Spacer(1, 0.5*cm))
+        
+        # Add mode comparison plots
+        for i, img_path in enumerate(mode_plots[:8]):  # Limit to 8 plots
+            try:
+                img = RLImage(img_path, width=14*cm, height=9*cm)
+                story.append(img)
+                story.append(Spacer(1, 0.3*cm))
+                
+                # Page break every 2 images
+                if (i + 1) % 2 == 0 and i < len(mode_plots) - 1:
+                    story.append(PageBreak())
+            except Exception:
+                continue
         
         return story
     

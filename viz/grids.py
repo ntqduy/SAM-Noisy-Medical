@@ -155,12 +155,40 @@ def save_preview_pdf(df: pd.DataFrame, cfg: dict, out_pdf: Path, num_samples: in
 
     y = H - 4.0*cm
 
-    def draw_panel(img_np, gt_np, pred_np, title: str, x0: float, y0: float, w: float, h: float):
+    def draw_panel(img_np, gt_np, pred_np, title: str, x0: float, y0: float, w: float, h: float, 
+                   dice_val: float = None, iou_val: float = None, is_fallback: bool = False):
+        """Draw a single panel with image, GT overlay, and pred overlay."""
         fig = plt.figure(figsize=(6, 2))
-        ax = fig.add_subplot(1, 3, 1); ax.imshow(img_np, cmap="gray"); ax.axis("off"); ax.set_title("Image")
-        ax = fig.add_subplot(1, 3, 2); ax.imshow(overlay(img_np, gt_np)); ax.axis("off"); ax.set_title("GT")
-        ax = fig.add_subplot(1, 3, 3); ax.imshow(overlay(img_np, pred_np)); ax.axis("off"); ax.set_title("Pred")
-        fig.suptitle(title, fontsize=10)
+        
+        # Add subtitle with metrics if available
+        subtitle = ""
+        if dice_val is not None:
+            subtitle += f"Dice: {dice_val:.3f}"
+        if iou_val is not None:
+            subtitle += f"  IoU: {iou_val:.3f}"
+        if is_fallback:
+            subtitle += " [original img]"
+        
+        ax = fig.add_subplot(1, 3, 1)
+        ax.imshow(img_np, cmap="gray")
+        ax.axis("off")
+        ax.set_title("Image", fontsize=9)
+        
+        ax = fig.add_subplot(1, 3, 2)
+        ax.imshow(overlay(img_np, gt_np))
+        ax.axis("off")
+        ax.set_title("GT", fontsize=9)
+        
+        ax = fig.add_subplot(1, 3, 3)
+        ax.imshow(overlay(img_np, pred_np))
+        ax.axis("off")
+        ax.set_title("Pred", fontsize=9)
+        
+        full_title = title
+        if subtitle:
+            full_title = f"{title}\n{subtitle}"
+        fig.suptitle(full_title, fontsize=9)
+        
         tmp = out_pdf.parent / "_tmp_preview.png"
         fig.tight_layout()
         fig.savefig(tmp, dpi=160, bbox_inches="tight")
@@ -224,23 +252,39 @@ def save_preview_pdf(df: pd.DataFrame, cfg: dict, out_pdf: Path, num_samples: in
         img_l2 = _resolve_image_for_level(cfg, dataset, r2["noise"], levels[1], sid, noise_seed, r0["img_path"])
         img_l4 = _resolve_image_for_level(cfg, dataset, r4["noise"], levels[2], sid, noise_seed, r0["img_path"])
         
-        # Fallback to original if resolve failed
+        # Track which images are fallbacks (original instead of noisy)
+        img_l2_fallback = (img_l2 is None) or np.array_equal(img_l2, img)
+        img_l4_fallback = (img_l4 is None) or np.array_equal(img_l4, img)
+        
         if img_l0 is None:
             img_l0 = img
         if img_l2 is None:
             img_l2 = img
+            img_l2_fallback = True
         if img_l4 is None:
             img_l4 = img
+            img_l4_fallback = True
 
         if y < 3.0*cm:
             c.showPage()
             y = H - 2.0*cm
+        
+        # Extract metrics from the dataframe rows
+        dice0 = r0.get("dice") if "dice" in r0 else None
+        iou0 = r0.get("iou") if "iou" in r0 else None
+        dice2 = r2.get("dice") if "dice" in r2 else None
+        iou2 = r2.get("iou") if "iou" in r2 else None
+        dice4 = r4.get("dice") if "dice" in r4 else None
+        iou4 = r4.get("iou") if "iou" in r4 else None
 
-        draw_panel(img_l0, gt, pred0, f"{sid} — Clean (L0)", 2*cm, y - panel_h, panel_w, panel_h)
+        draw_panel(img_l0, gt, pred0, f"{sid} — Clean (L0)", 2*cm, y - panel_h, panel_w, panel_h,
+                   dice_val=dice0, iou_val=iou0)
         y -= (panel_h + 0.3*cm)
-        draw_panel(img_l2, gt, pred2, f"{sid} — Noisy {levels[1]} ({r2['noise']})", 2*cm, y - panel_h, panel_w, panel_h)
+        draw_panel(img_l2, gt, pred2, f"{sid} — Noisy {levels[1]} ({r2['noise']})", 2*cm, y - panel_h, panel_w, panel_h,
+                   dice_val=dice2, iou_val=iou2, is_fallback=img_l2_fallback)
         y -= (panel_h + 0.3*cm)
-        draw_panel(img_l4, gt, pred4, f"{sid} — Noisy {levels[2]} ({r4['noise']})", 2*cm, y - panel_h, panel_w, panel_h)
+        draw_panel(img_l4, gt, pred4, f"{sid} — Noisy {levels[2]} ({r4['noise']})", 2*cm, y - panel_h, panel_w, panel_h,
+                   dice_val=dice4, iou_val=iou4, is_fallback=img_l4_fallback)
         y -= (panel_h + 0.6*cm)
 
     c.save()
