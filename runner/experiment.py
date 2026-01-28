@@ -30,11 +30,15 @@ from model.registry import build_model_runner
 from noises.registry import build_noise
 from noises.base import NoiseResult
 
-from viz.grids import save_preview_pdf, save_noise_gallery, create_noise_comparison_grid
+from viz.grids import (
+    save_preview_pdf, save_noise_gallery, create_noise_comparison_grid,
+    create_noise_visualization_gallery, create_noise_effect_comparison
+)
 from viz.plots import (
     plot_metric_vs_level, plot_model_comparison, plot_ofat_sensitivity, plot_grid_heatmap,
     plot_global_sensitivity, plot_psnr_vs_performance, plot_stability_summary, plot_summary_heatmap,
-    plot_noise_comparison, plot_uncertainty_vs_performance
+    plot_noise_comparison, plot_uncertainty_vs_performance,
+    plot_metric_vs_level_by_mode, plot_mode_comparison
 )
 from viz.failure_cases import analyze_failure_patterns, export_failure_cases
 from reports.pdf_builder import build_report_pdf
@@ -503,9 +507,13 @@ def _generate_outputs(
         plot_paths += plot_model_comparison(df, figures_dir, metric="dice")
         plot_paths += plot_noise_comparison(df, figures_dir, metric="dice")
         
+        # NEW: Compare metric vs level by mode (auto vs prompt_bbox) using intensity from config
+        plot_paths += plot_metric_vs_level_by_mode(df, figures_dir, metrics=["dice", "iou"], cfg=cfg)
+        plot_paths += plot_mode_comparison(df, figures_dir, metric="dice", cfg=cfg)
+        plot_paths += plot_mode_comparison(df, figures_dir, metric="iou", cfg=cfg)
         
-        # Global comparative plots
-        plot_paths += plot_global_sensitivity(df, figures_dir, metric="dice")
+        # Global comparative plots (now with intensity from config)
+        plot_paths += plot_global_sensitivity(df, figures_dir, metric="dice", cfg=cfg)
         plot_paths += plot_summary_heatmap(df, figures_dir, stability)
 
         # Plot stability
@@ -527,6 +535,35 @@ def _generate_outputs(
         plot_paths += gallery_paths
     except Exception as e:
         warnings.warn(f"[WARN] Failed to generate noise gallery: {e}")
+
+    # NEW: Noise visualization gallery (overlay only at L0, noisy images for L1-L4)
+    try:
+        noise_viz_paths = create_noise_visualization_gallery(
+            df=df,
+            cfg=cfg,
+            out_dir=figures_dir / "noise_visualization",
+            num_samples=int(outputs_cfg.get("noise_viz_samples", 5)),
+            levels=list(outputs_cfg.get("noise_viz_levels", ["L0", "L1", "L2", "L3", "L4"])),
+        )
+        plot_paths += noise_viz_paths
+        print(f"[INFO] Generated {len(noise_viz_paths)} noise visualization images.")
+    except Exception as e:
+        warnings.warn(f"[WARN] Failed to generate noise visualization gallery: {e}")
+
+    # NEW: Noise effect comparison for first few samples
+    try:
+        sample_ids = df[df["protocol"] == "P0"]["id"].dropna().unique().tolist()[:3]
+        for sid in sample_ids:
+            effect_paths = create_noise_effect_comparison(
+                df=df,
+                cfg=cfg,
+                out_dir=figures_dir / "noise_effect",
+                sample_id=sid,
+                levels=list(outputs_cfg.get("noise_effect_levels", ["L0", "L1", "L2", "L3", "L4"])),
+            )
+            plot_paths += effect_paths
+    except Exception as e:
+        warnings.warn(f"[WARN] Failed to generate noise effect comparison: {e}")
 
     # Preview PDF
     preview_pdf = exp_dir / "preview.pdf"

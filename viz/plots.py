@@ -1,9 +1,57 @@
 from pathlib import Path
 from turtle import title
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
+
+
+def _get_intensity_scalars_from_cfg(cfg: Dict[str, Any]) -> Dict[str, float]:
+    """
+    Extract intensity_scalars from config.
+    
+    Args:
+        cfg: Configuration dictionary
+        
+    Returns:
+        Dict mapping level names to intensity scalars
+    """
+    if cfg is None:
+        return {"L0": 0.0, "L1": 0.25, "L2": 0.5, "L3": 0.75, "L4": 1.0}
+    
+    levels_cfg = cfg.get("levels", {}) or {}
+    intensity_scalars = levels_cfg.get("intensity_scalars", {})
+    
+    if not intensity_scalars:
+        # Fallback default
+        return {"L0": 0.0, "L1": 0.25, "L2": 0.5, "L3": 0.75, "L4": 1.0}
+    
+    return intensity_scalars
+
+
+def _add_intensity_scalars_to_df(df: pd.DataFrame, cfg: Dict[str, Any]) -> pd.DataFrame:
+    """
+    Add intensity_scalar column to DataFrame using config mapping.
+    
+    Args:
+        df: Results DataFrame
+        cfg: Configuration dictionary
+        
+    Returns:
+        DataFrame with intensity_scalar column
+    """
+    df = df.copy()
+    intensity_scalars = _get_intensity_scalars_from_cfg(cfg)
+    
+    if "intensity_scalar" not in df.columns:
+        df["intensity_scalar"] = df["level"].map(intensity_scalars).fillna(0.5)
+    else:
+        # Fill missing values using config
+        mask = df["intensity_scalar"].isna()
+        if mask.any():
+            df.loc[mask, "intensity_scalar"] = df.loc[mask, "level"].map(intensity_scalars).fillna(0.5)
+    
+    return df
 
 
 def plot_metric_vs_level(df: pd.DataFrame, out_dir: Path, protocols: List[str], metrics: List[str]) -> List[str]:
@@ -55,6 +103,212 @@ def plot_metric_vs_level(df: pd.DataFrame, out_dir: Path, protocols: List[str], 
             plt.close()
             paths.append(str(out_png))
             paths.append(str(out_pdf))
+    return paths
+
+
+def plot_metric_vs_level_by_mode(
+    df: pd.DataFrame, 
+    out_dir: Path, 
+    metrics: List[str] = None,
+    protocols: List[str] = None,
+    cfg: Dict[str, Any] = None
+) -> List[str]:
+    """
+    Plot metric vs level comparing different modes (automatic vs prompt_bbox).
+    
+    Generates 4 comparison plots:
+      - Dice vs Level (automatic mode, all noises)
+      - Dice vs Level (prompt_bbox mode, all noises)  
+      - IoU vs Level (automatic mode, all noises)
+      - IoU vs Level (prompt_bbox mode, all noises)
+      
+    Args:
+        df: Results DataFrame
+        out_dir: Output directory
+        metrics: List of metrics to plot (default: ["dice", "iou"])
+        protocols: Protocols to include (default: ["P1"])
+        cfg: Configuration dictionary (for intensity_scalars)
+        
+    Returns:
+        List of saved plot paths
+    """
+    out_dir = Path(out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    
+    out_dir_png = out_dir / "plot_png"
+    out_dir_png.mkdir(parents=True, exist_ok=True)
+    out_dir_pdf = out_dir / "plot_pdf"
+    out_dir_pdf.mkdir(parents=True, exist_ok=True)
+    
+    paths = []
+    
+    if metrics is None:
+        metrics = ["dice", "iou"]
+    if protocols is None:
+        protocols = ["P1"]
+    
+    # Add intensity_scalar from config
+    df = _add_intensity_scalars_to_df(df, cfg)
+    intensity_scalars = _get_intensity_scalars_from_cfg(cfg)
+    
+    sub = df[df["protocol"].isin(protocols)].copy()
+    if len(sub) == 0:
+        return paths
+    
+    level_order = ["L0", "L1", "L2", "L3", "L4"]
+    modes = sub["mode"].unique()
+    
+    # Generate comparison plots for each mode separately
+    for metric in metrics:
+        if metric not in sub.columns:
+            continue
+        
+        for mode in modes:
+            mode_data = sub[sub["mode"] == mode]
+            if len(mode_data) == 0:
+                continue
+            
+            # Group by dataset, model, weight
+            for (dataset, model, weight), g in mode_data.groupby(["dataset", "model", "weight"]):
+                # Plot all noise types on one chart
+                plt.figure(figsize=(12, 7))
+                
+                noise_types = g["noise"].unique()
+                colors = plt.cm.tab10(np.linspace(0, 1, min(len(noise_types), 10)))
+                
+                for noise, color in zip(noise_types, colors):
+                    noise_data = g[g["noise"] == noise]
+                    agg = noise_data.groupby("level")[metric].mean().reset_index()
+                    
+                    # Keep only standard levels
+                    agg = agg[agg["level"].isin(level_order)].copy()
+                    if len(agg) == 0:
+                        continue
+                    
+                    agg["level"] = pd.Categorical(agg["level"], categories=level_order, ordered=True)
+                    agg = agg.sort_values("level")
+                    
+                    # Map level to intensity_scalar for x-axis
+                    agg["intensity"] = agg["level"].map(intensity_scalars).fillna(0.5)
+                    
+                    plt.plot(agg["intensity"], agg[metric].values, 
+                             marker="o", label=noise, color=color, linewidth=2, markersize=6)
+                
+                plt.xlabel("Intensity Scalar (from config)", fontsize=11)
+                plt.ylabel(metric.upper(), fontsize=11)
+                title = f"Compare {metric.upper()} vs Level ({mode})\n{dataset} | {model}/{weight}"
+                plt.title(title, fontsize=10, pad=8)
+                plt.legend(bbox_to_anchor=(1.02, 1), loc="upper left", fontsize=9)
+                plt.grid(True, alpha=0.3)
+                plt.xlim(-0.05, 1.05)
+                plt.ylim(0, 1.05)
+                
+                # Add level labels on x-axis
+                level_positions = [intensity_scalars.get(lv, 0) for lv in level_order]
+                plt.xticks(level_positions, [f"{lv}\n({intensity_scalars.get(lv, 0):.2f})" for lv in level_order])
+                
+                out_png = out_dir_png / f"compare_{metric}_vs_level_{mode}_{dataset}_{model}-{weight}.png"
+                out_pdf = out_dir_pdf / f"compare_{metric}_vs_level_{mode}_{dataset}_{model}-{weight}.pdf"
+                plt.tight_layout()
+                plt.savefig(out_png, dpi=160, bbox_inches='tight')
+                plt.savefig(out_pdf, bbox_inches='tight')
+                plt.close()
+                paths.append(str(out_png))
+                paths.append(str(out_pdf))
+    
+    return paths
+
+
+def plot_mode_comparison(
+    df: pd.DataFrame,
+    out_dir: Path,
+    metric: str = "dice",
+    protocols: List[str] = None,
+    cfg: Dict[str, Any] = None
+) -> List[str]:
+    """
+    Plot mode comparison (automatic vs prompt_bbox) for each noise type.
+    
+    Args:
+        df: Results DataFrame
+        out_dir: Output directory
+        metric: Metric to compare (default: "dice")
+        protocols: Protocols to include (default: ["P1"])
+        cfg: Configuration dictionary
+        
+    Returns:
+        List of saved plot paths
+    """
+    out_dir = Path(out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    
+    out_dir_png = out_dir / "plot_png"
+    out_dir_png.mkdir(parents=True, exist_ok=True)
+    out_dir_pdf = out_dir / "plot_pdf"
+    out_dir_pdf.mkdir(parents=True, exist_ok=True)
+    
+    paths = []
+    
+    if protocols is None:
+        protocols = ["P1"]
+    
+    df = _add_intensity_scalars_to_df(df, cfg)
+    intensity_scalars = _get_intensity_scalars_from_cfg(cfg)
+    
+    sub = df[df["protocol"].isin(protocols)].copy()
+    if len(sub) == 0 or metric not in sub.columns:
+        return paths
+    
+    level_order = ["L0", "L1", "L2", "L3", "L4"]
+    modes = sorted(sub["mode"].unique())
+    
+    if len(modes) < 2:
+        return paths  # Need at least 2 modes to compare
+    
+    # Plot comparison for each dataset, model, noise
+    for (dataset, model, weight, noise), g in sub.groupby(["dataset", "model", "weight", "noise"]):
+        plt.figure(figsize=(10, 6))
+        
+        mode_colors = {"automatic": "blue", "prompt_bbox": "red", "prompt_point": "green"}
+        
+        for mode in modes:
+            mode_data = g[g["mode"] == mode]
+            if len(mode_data) == 0:
+                continue
+            
+            agg = mode_data.groupby("level")[metric].mean().reset_index()
+            agg = agg[agg["level"].isin(level_order)].copy()
+            if len(agg) == 0:
+                continue
+            
+            agg["level"] = pd.Categorical(agg["level"], categories=level_order, ordered=True)
+            agg = agg.sort_values("level")
+            agg["intensity"] = agg["level"].map(intensity_scalars).fillna(0.5)
+            
+            color = mode_colors.get(mode, "gray")
+            plt.plot(agg["intensity"], agg[metric].values, 
+                     marker="o", label=mode, color=color, linewidth=2, markersize=8)
+        
+        plt.xlabel("Intensity Scalar", fontsize=11)
+        plt.ylabel(metric.upper(), fontsize=11)
+        plt.title(f"Mode Comparison: {metric.upper()} — {dataset} | {model}/{weight} | {noise}", fontsize=10)
+        plt.legend(loc="lower left", fontsize=10)
+        plt.grid(True, alpha=0.3)
+        plt.xlim(-0.05, 1.05)
+        plt.ylim(0, 1.05)
+        
+        level_positions = [intensity_scalars.get(lv, 0) for lv in level_order]
+        plt.xticks(level_positions, level_order)
+        
+        out_png = out_dir_png / f"mode_comparison_{metric}_{dataset}_{model}-{weight}_{noise}.png"
+        out_pdf = out_dir_pdf / f"mode_comparison_{metric}_{dataset}_{model}-{weight}_{noise}.pdf"
+        plt.tight_layout()
+        plt.savefig(out_png, dpi=160)
+        plt.savefig(out_pdf, bbox_inches='tight')
+        plt.close()
+        paths.append(str(out_png))
+        paths.append(str(out_pdf))
+    
     return paths
 
 
@@ -342,14 +596,15 @@ def plot_global_sensitivity(
     df: pd.DataFrame,
     out_dir: Path,
     metric: str = "dice",
-    protocols: List[str] = None
+    protocols: List[str] = None,
+    cfg: Dict[str, Any] = None
 ) -> List[str]:
     """
     Create global sensitivity analysis plots comparing all noise types.
     
     Generates:
       1. Sensitivity heatmap: noise types × levels
-      2. Sensitivity curves: metric vs intensity_scalar
+      2. Sensitivity curves: metric vs intensity_scalar (using config values)
       3. Ranking plots: noise types sorted by impact
     
     Args:
@@ -357,6 +612,7 @@ def plot_global_sensitivity(
         out_dir: Output directory
         metric: Metric to analyze (default: "dice")
         protocols: Protocols to include (default: ["P1"])
+        cfg: Configuration dictionary (for intensity_scalars)
         
     Returns:
         List of saved plot paths
@@ -372,6 +628,10 @@ def plot_global_sensitivity(
     
     if protocols is None:
         protocols = ["P1"]
+    
+    # Add intensity_scalar from config
+    df = _add_intensity_scalars_to_df(df, cfg)
+    intensity_scalars = _get_intensity_scalars_from_cfg(cfg)
     
     sub = df[df["protocol"].isin(protocols)].copy()
     if len(sub) == 0 or metric not in sub.columns:
@@ -430,37 +690,49 @@ def plot_global_sensitivity(
         paths.append(str(out_png))
         paths.append(str(out_pdf))
     
-    # 2. Sensitivity curves: metric vs intensity_scalar
-    if "intensity_scalar" in sub.columns:
-        for (dataset, model, weight, mode), g in sub.groupby(["dataset", "model", "weight", "mode"]):
-            plt.figure(figsize=(12, 6))
+    # 2. Sensitivity curves: metric vs intensity_scalar (from config)
+    level_order_all = ["L0", "L1", "L2", "L3", "L4"]
+    for (dataset, model, weight, mode), g in sub.groupby(["dataset", "model", "weight", "mode"]):
+        plt.figure(figsize=(12, 6))
+        
+        for noise in g["noise"].unique():
+            noise_data = g[g["noise"] == noise]
+            # Group by level and map to intensity_scalar from config
+            agg = noise_data.groupby("level")[metric].mean().reset_index()
+            agg = agg[agg["level"].isin(level_order_all)].copy()
             
-            for noise in g["noise"].unique():
-                noise_data = g[g["noise"] == noise].groupby("intensity_scalar")[metric].mean().reset_index()
-                if len(noise_data) > 1:
-                    noise_data = noise_data.sort_values("intensity_scalar")
-                    plt.plot(noise_data["intensity_scalar"], noise_data[metric], 
-                            marker="o", label=noise, linewidth=2, markersize=6)
-            
-            plt.xlabel("Intensity Scalar (normalized severity)")
-            plt.ylabel(metric.capitalize())
-            plt.title(f"Sensitivity Curves: {metric} vs Intensity — {dataset} | {model}/{weight} | {mode}")
-            plt.legend(bbox_to_anchor=(1.05, 1), loc="upper left")
-            plt.grid(True, alpha=0.3)
-            
-            # Add baseline reference line
-            if f"{metric}_baseline" in g.columns:
-                baseline_val = g[f"{metric}_baseline"].iloc[0]
-                plt.axhline(y=baseline_val, color='gray', linestyle='--', label='Baseline (P0)')
-            
-            out_png = out_dir_png / f"sensitivity_curves_{dataset}_{model}-{weight}_{mode}.png"
-            out_pdf = out_dir_pdf / f"sensitivity_curves_{dataset}_{model}-{weight}_{mode}.pdf"
-            plt.tight_layout()
-            plt.savefig(out_png, dpi=160)
-            plt.savefig(out_pdf, bbox_inches="tight")
-            plt.close()
-            paths.append(str(out_png))
-            paths.append(str(out_pdf))
+            if len(agg) > 1:
+                # Map level to intensity scalar from config
+                agg["intensity_scalar"] = agg["level"].map(intensity_scalars).fillna(0.5)
+                agg = agg.sort_values("intensity_scalar")
+                plt.plot(agg["intensity_scalar"], agg[metric], 
+                        marker="o", label=noise, linewidth=2, markersize=6)
+        
+        plt.xlabel("Intensity Scalar (from config)", fontsize=11)
+        plt.ylabel(metric.capitalize(), fontsize=11)
+        plt.title(f"Sensitivity Curves: {metric} vs Intensity — {dataset} | {model}/{weight} | {mode}", fontsize=10)
+        plt.legend(bbox_to_anchor=(1.05, 1), loc="upper left")
+        plt.grid(True, alpha=0.3)
+        plt.xlim(-0.05, 1.05)
+        plt.ylim(0, 1.05)
+        
+        # Add level labels on x-axis
+        level_positions = [intensity_scalars.get(lv, 0) for lv in level_order_all]
+        plt.xticks(level_positions, [f"{lv}\n({intensity_scalars.get(lv, 0):.2f})" for lv in level_order_all])
+        
+        # Add baseline reference line
+        if f"{metric}_baseline" in g.columns and not g[f"{metric}_baseline"].isna().all():
+            baseline_val = g[f"{metric}_baseline"].iloc[0]
+            plt.axhline(y=baseline_val, color='gray', linestyle='--', alpha=0.7, label='Baseline (P0)')
+        
+        out_png = out_dir_png / f"sensitivity_curves_{dataset}_{model}-{weight}_{mode}.png"
+        out_pdf = out_dir_pdf / f"sensitivity_curves_{dataset}_{model}-{weight}_{mode}.pdf"
+        plt.tight_layout()
+        plt.savefig(out_png, dpi=160, bbox_inches='tight')
+        plt.savefig(out_pdf, bbox_inches='tight')
+        plt.close()
+        paths.append(str(out_png))
+        paths.append(str(out_pdf))
     
     # 3. Impact ranking (sorted bar chart)
     impact = sub.groupby(["dataset", "model", "weight", "mode", "noise"]).agg({

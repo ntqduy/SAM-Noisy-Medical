@@ -836,3 +836,334 @@ def _create_summary_noise_gallery_v2(df, cfg, out_dir, sample_id, noise_types, l
     plt.savefig(out_png, dpi=150, bbox_inches='tight')
     plt.savefig(out_pdf, bbox_inches='tight')
     plt.close()
+
+
+def create_noise_visualization_gallery(
+    df: pd.DataFrame,
+    cfg: dict,
+    out_dir: Path,
+    num_samples: int = 5,
+    noise_types: List[str] = None,
+    levels: List[str] = None
+) -> List[str]:
+    """
+    Create noise visualization gallery showing ONLY overlays at L0 (clean),
+    while other levels show noisy images WITHOUT overlay.
+    
+    This allows visual inspection of:
+      1. L0: Clean image with GT/Pred overlay to see segmentation quality
+      2. L1-L4: Pure noisy images to see actual noise effects
+    
+    Args:
+        df: Results DataFrame
+        cfg: Configuration dictionary
+        out_dir: Output directory
+        num_samples: Number of samples to include
+        noise_types: List of noise types (None = all)
+        levels: List of levels (default: ["L0", "L1", "L2", "L3", "L4"])
+        
+    Returns:
+        List of saved image paths
+    """
+    out_dir = Path(out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    paths = []
+    
+    if levels is None:
+        levels = ["L0", "L1", "L2", "L3", "L4"]
+    
+    # Get noise types
+    if noise_types is None:
+        noise_types = sorted([n for n in df["noise"].unique() if n != "clean"])
+    noise_types = [n for n in noise_types if n in df["noise"].values]
+    
+    if len(noise_types) == 0:
+        return paths
+    
+    # Get sample IDs
+    base = df[df["protocol"] == "P0"]
+    if len(base) == 0:
+        return paths
+    
+    sample_ids = base["id"].dropna().unique().tolist()[:num_samples]
+    
+    pred_root = get_pred_root(cfg)
+    noise_seed = cfg.get("noise_config", {}).get("base_seed", 42)
+    
+    for sid in sample_ids:
+        # Get base row
+        r0 = base[base["id"] == sid]
+        if len(r0) == 0:
+            continue
+        r0 = r0.iloc[0]
+        dataset = r0["dataset"]
+        
+        try:
+            img = _safe_read_gray(r0["img_path"])
+            gt = _safe_read_mask(r0["mask_path"])
+        except Exception:
+            continue
+        
+        if img is None or gt is None:
+            continue
+        
+        n_rows = len(noise_types)
+        n_cols = len(levels)
+        
+        fig, axes = plt.subplots(n_rows, n_cols, figsize=(3.5 * n_cols, 3 * n_rows))
+        if n_rows == 1:
+            axes = axes.reshape(1, -1)
+        if n_cols == 1:
+            axes = axes.reshape(-1, 1)
+        
+        for i, noise in enumerate(noise_types):
+            for j, lv in enumerate(levels):
+                ax = axes[i, j]
+                
+                if lv == "L0":
+                    # L0: Show clean image with GT + Pred overlay
+                    # Get prediction for this sample
+                    pred_result = resolve_pred_path(
+                        pred_root=pred_root,
+                        dataset=r0["dataset"],
+                        model=r0["model"],
+                        weight=r0["weight"],
+                        mode=r0["mode"],
+                        protocol="P0",
+                        noise="clean",
+                        level="L0",
+                        sid=str(sid),
+                        noise_seed=noise_seed,
+                        log_debug=False
+                    )
+                    
+                    # Create overlay: GT (green) + Pred (red)
+                    vis_gt = overlay(img, gt, alpha=0.4, color=(0, 255, 0))
+                    
+                    if pred_result.found:
+                        pred = _safe_read_mask(str(pred_result.path))
+                        if pred is not None:
+                            # Overlay pred on top of GT overlay
+                            vis_combined = overlay(img, pred, alpha=0.4, color=(255, 0, 0))
+                            # Blend GT and Pred overlays
+                            vis = np.maximum(vis_gt, vis_combined * 0.6).astype(np.uint8)
+                            ax.imshow(vis)
+                            
+                            # Show dice score
+                            dice = r0.get("dice", None)
+                            if dice is not None and not np.isnan(dice):
+                                ax.text(0.02, 0.98, f"Dice: {dice:.2f}",
+                                       transform=ax.transAxes, fontsize=8, va='top',
+                                       bbox=dict(facecolor='white', alpha=0.7))
+                        else:
+                            ax.imshow(vis_gt)
+                    else:
+                        ax.imshow(vis_gt)
+                    
+                    ax.set_title("L0 (Clean + Overlay)", fontsize=9)
+                else:
+                    # L1-L4: Show ONLY noisy image WITHOUT overlay
+                    rows = df[
+                        (df["id"] == sid) &
+                        (df["protocol"] == "P1") &
+                        (df["level"] == lv) &
+                        (df["noise"] == noise)
+                    ]
+                    
+                    if len(rows) > 0:
+                        row = rows.iloc[0]
+                        
+                        # Load noisy image for this level
+                        img_for_level = _resolve_image_for_level(
+                            cfg, dataset, noise, lv, sid, noise_seed, r0["img_path"]
+                        )
+                        if img_for_level is None:
+                            img_for_level = img
+                        
+                        # Show ONLY noisy image (no overlay)
+                        ax.imshow(img_for_level, cmap="gray")
+                        
+                        # Add PSNR/SSIM to show image quality degradation
+                        psnr = row.get("psnr", None)
+                        ssim = row.get("ssim", None)
+                        
+                        info = []
+                        if psnr is not None and not np.isnan(psnr):
+                            info.append(f"PSNR: {psnr:.1f}")
+                        if ssim is not None and not np.isnan(ssim):
+                            info.append(f"SSIM: {ssim:.2f}")
+                        
+                        if info:
+                            ax.text(0.02, 0.98, "\n".join(info),
+                                   transform=ax.transAxes, fontsize=7, va='top',
+                                   bbox=dict(facecolor='white', alpha=0.7))
+                        
+                        ax.set_title(f"{lv}", fontsize=9)
+                    else:
+                        ax.imshow(np.zeros_like(img), cmap="gray")
+                        ax.set_title(f"{lv} (N/A)", fontsize=9)
+                
+                ax.axis("off")
+                
+                # Row label
+                if j == 0:
+                    ax.text(-0.12, 0.5, noise, transform=ax.transAxes, fontsize=10,
+                           rotation=90, va='center', ha='center', fontweight='bold')
+        
+        plt.suptitle(f"Noise Visualization: {sid}\n(L0: overlay, L1-L4: noisy image only)", 
+                     fontsize=12, fontweight='bold')
+        plt.tight_layout()
+        
+        out_png = out_dir / f"noise_viz_{sid}.png"
+        out_pdf = out_dir / f"noise_viz_{sid}.pdf"
+        plt.savefig(out_png, dpi=150, bbox_inches='tight')
+        plt.savefig(out_pdf, bbox_inches='tight')
+        plt.close()
+        paths.append(str(out_png))
+        paths.append(str(out_pdf))
+    
+    return paths
+
+
+def create_noise_effect_comparison(
+    df: pd.DataFrame,
+    cfg: dict,
+    out_dir: Path,
+    sample_id: str,
+    noise_types: List[str] = None,
+    levels: List[str] = None
+) -> List[str]:
+    """
+    Create a detailed noise effect comparison for a single sample.
+    
+    Shows:
+      - Row 1: Clean image progression (L0 with overlay)
+      - Row 2+: Each noise type showing degradation across levels (noisy images only)
+    
+    Args:
+        df: Results DataFrame
+        cfg: Configuration dictionary  
+        out_dir: Output directory
+        sample_id: Sample ID to visualize
+        noise_types: List of noise types (None = all)
+        levels: List of levels
+        
+    Returns:
+        List of saved paths
+    """
+    out_dir = Path(out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    paths = []
+    
+    if levels is None:
+        levels = ["L0", "L1", "L2", "L3", "L4"]
+    
+    if noise_types is None:
+        noise_types = sorted([n for n in df["noise"].unique() if n != "clean"])
+    
+    # Get base row
+    base = df[(df["protocol"] == "P0") & (df["id"] == sample_id)]
+    if len(base) == 0:
+        return paths
+    
+    r0 = base.iloc[0]
+    dataset = r0["dataset"]
+    
+    try:
+        img = _safe_read_gray(r0["img_path"])
+        gt = _safe_read_mask(r0["mask_path"])
+    except Exception:
+        return paths
+    
+    if img is None or gt is None:
+        return paths
+    
+    pred_root = get_pred_root(cfg)
+    noise_seed = cfg.get("noise_config", {}).get("base_seed", 42)
+    
+    n_rows = len(noise_types) + 1  # +1 for header row
+    n_cols = len(levels)
+    
+    fig, axes = plt.subplots(n_rows, n_cols, figsize=(3.5 * n_cols, 3 * n_rows))
+    if n_rows == 1:
+        axes = axes.reshape(1, -1)
+    if n_cols == 1:
+        axes = axes.reshape(-1, 1)
+    
+    # Row 0: Clean image with GT overlay (same across all columns)
+    for j, lv in enumerate(levels):
+        ax = axes[0, j]
+        vis_gt = overlay(img, gt, alpha=0.4, color=(0, 255, 0))
+        ax.imshow(vis_gt)
+        ax.set_title(f"{lv}" if j > 0 else "Clean (Reference)", fontsize=10)
+        ax.axis("off")
+        if j == 0:
+            ax.text(-0.12, 0.5, "Clean\n(GT overlay)", transform=ax.transAxes, fontsize=9,
+                   rotation=90, va='center', ha='center', fontweight='bold')
+    
+    # Rows 1+: Noisy images for each noise type
+    for i, noise in enumerate(noise_types, start=1):
+        for j, lv in enumerate(levels):
+            ax = axes[i, j]
+            
+            if lv == "L0":
+                # L0 column shows clean image as reference
+                ax.imshow(img, cmap="gray")
+                ax.set_title("Clean" if i == 1 else "", fontsize=9)
+            else:
+                # Load noisy image
+                rows = df[
+                    (df["id"] == sample_id) &
+                    (df["protocol"] == "P1") &
+                    (df["level"] == lv) &
+                    (df["noise"] == noise)
+                ]
+                
+                if len(rows) > 0:
+                    row = rows.iloc[0]
+                    
+                    img_for_level = _resolve_image_for_level(
+                        cfg, dataset, noise, lv, sample_id, noise_seed, r0["img_path"]
+                    )
+                    if img_for_level is None:
+                        img_for_level = img
+                    
+                    ax.imshow(img_for_level, cmap="gray")
+                    
+                    # Show metrics
+                    psnr = row.get("psnr", None)
+                    dice = row.get("dice", None)
+                    
+                    info = []
+                    if psnr is not None and not np.isnan(psnr):
+                        info.append(f"PSNR:{psnr:.0f}")
+                    if dice is not None and not np.isnan(dice):
+                        color = 'green' if dice > 0.8 else 'red'
+                        info.append(f"Dice:{dice:.2f}")
+                    
+                    if info:
+                        ax.text(0.02, 0.98, " | ".join(info),
+                               transform=ax.transAxes, fontsize=7, va='top',
+                               bbox=dict(facecolor='white', alpha=0.7))
+                else:
+                    ax.imshow(np.zeros_like(img), cmap="gray")
+            
+            ax.axis("off")
+            
+            # Row label
+            if j == 0:
+                ax.text(-0.12, 0.5, noise, transform=ax.transAxes, fontsize=10,
+                       rotation=90, va='center', ha='center', fontweight='bold')
+    
+    plt.suptitle(f"Noise Effect Comparison: {sample_id}", fontsize=14, fontweight='bold')
+    plt.tight_layout()
+    
+    out_png = out_dir / f"noise_effect_{sample_id}.png"
+    out_pdf = out_dir / f"noise_effect_{sample_id}.pdf"
+    plt.savefig(out_png, dpi=150, bbox_inches='tight')
+    plt.savefig(out_pdf, bbox_inches='tight')
+    plt.close()
+    paths.append(str(out_png))
+    paths.append(str(out_pdf))
+    
+    return paths
