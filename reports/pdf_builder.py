@@ -195,7 +195,7 @@ class PDFReportBuilder:
         info_data = [
             ["Experiment Name:", exp_name],
             ["Phase:", str(phase)],
-            ["Generated:", datetime.now().strftime("%Y-%m-%d %H:%M:%S")],
+            # ["Generated:", datetime.now().strftime("%Y-%m-%d %H:%M:%S")],
         ]
         
         info_table = Table(info_data, colWidths=[4*cm, 8*cm])
@@ -782,10 +782,10 @@ class PDFReportBuilder:
             story.append(Paragraph(f"• <b>{fname}</b>: {desc}", self.styles['MyBodyText']))
         
         story.append(Spacer(1, 1*cm))
-        story.append(Paragraph(
-            f"Report generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
-            self.styles['SmallText']
-        ))
+        # story.append(Paragraph(
+        #     #f"Report generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
+        #     self.styles['SmallText']
+        # ))
         
         return story
 
