@@ -776,18 +776,18 @@ class PDFReportBuilder:
         return story
     
     def _build_noise_gallery_section(self, gallery_paths: List[str]) -> List:
-        """Build noise gallery visualization section."""
+        """Build noise gallery visualization section with organized categories."""
         story = []
         
         if not gallery_paths:
             return story
         
         story.append(PageBreak())
-        story.append(Paragraph("Noise Gallery", self.styles['SectionTitle']))
+        story.append(Paragraph("Noise Gallery & Visual Comparisons", self.styles['SectionTitle']))
         
         story.append(Paragraph(
-            "Visual comparison of image quality degradation across noise types and severity levels. "
-            "Each panel shows the noisy image with prediction overlay and associated metrics (PSNR, SSIM, Dice).",
+            "This section provides visual comparisons of image quality degradation across different noise types and severity levels. "
+            "These visualizations help understand how each noise type affects the segmentation performance.",
             self.styles['MyBodyText']
         ))
         story.append(Spacer(1, 0.5*cm))
@@ -795,19 +795,84 @@ class PDFReportBuilder:
         # Filter to only valid image files (not PDFs)
         valid_gallery_paths = [p for p in gallery_paths if self._is_valid_image(p)]
         
-        # Add gallery images
-        for i, img_path in enumerate(valid_gallery_paths[:6]):  # Limit to 6 galleries
-            try:
-                # Determine if it's a wide or tall image
-                img = RLImage(img_path, width=16*cm, height=12*cm)
-                story.append(img)
-                story.append(Spacer(1, 0.5*cm))
-                
-                # Page break after every image (galleries are large)
-                if i < len(valid_gallery_paths) - 1:
-                    story.append(PageBreak())
-            except Exception:
-                continue
+        if not valid_gallery_paths:
+            story.append(Paragraph("No valid gallery images found.", self.styles['MyBodyText']))
+            return story
+        
+        # Categorize images by type
+        comprehensive = [p for p in valid_gallery_paths if "comprehensive" in p.lower()]
+        noise_type_galleries = [p for p in valid_gallery_paths if "noise_gallery_" in p.lower()]
+        noise_viz = [p for p in valid_gallery_paths if "noise_visualization" in p.lower() or "noise_viz" in p.lower()]
+        noise_effect = [p for p in valid_gallery_paths if "noise_effect" in p.lower()]
+        others = [p for p in valid_gallery_paths if p not in comprehensive + noise_type_galleries + noise_viz + noise_effect]
+        
+        def add_gallery_group(paths: List[str], title: str, description: str, max_images: int = 6):
+            """Add a group of gallery images with title and description."""
+            if not paths:
+                return
+            
+            story.append(Paragraph(title, self.styles['SubSection']))
+            story.append(Paragraph(description, self.styles['SmallText']))
+            story.append(Spacer(1, 0.3*cm))
+            
+            for i, img_path in enumerate(paths[:max_images]):
+                try:
+                    # Determine appropriate size based on image type
+                    if "comprehensive" in img_path.lower():
+                        img = RLImage(img_path, width=17*cm, height=20*cm)
+                    else:
+                        img = RLImage(img_path, width=16*cm, height=10*cm)
+                    story.append(img)
+                    story.append(Spacer(1, 0.3*cm))
+                    
+                    # Page break after each large image
+                    if i < len(paths) - 1:
+                        story.append(PageBreak())
+                except Exception:
+                    continue
+        
+        # Add comprehensive comparisons first (most detailed)
+        add_gallery_group(
+            comprehensive,
+            "Comprehensive Noise Comparisons",
+            "Each grid shows all noise types (rows) across all severity levels (columns) for a single sample. "
+            "Each cell shows the noisy image and prediction overlay with Dice score.",
+            max_images=4
+        )
+        
+        # Add noise type galleries
+        add_gallery_group(
+            noise_type_galleries,
+            "Per-Noise-Type Galleries",
+            "Each image shows multiple samples (rows) for a single noise type across severity levels (columns). "
+            "Dice scores are color-coded: green (>0.8), orange (0.5-0.8), red (<0.5).",
+            max_images=8
+        )
+        
+        # Add noise visualization
+        add_gallery_group(
+            noise_viz,
+            "Noise Visualization Samples",
+            "Visual examples of how different noise types affect image quality at various severity levels.",
+            max_images=6
+        )
+        
+        # Add noise effect comparisons
+        add_gallery_group(
+            noise_effect,
+            "Noise Effect Comparisons",
+            "Side-by-side comparison showing the effect of each noise type on segmentation.",
+            max_images=4
+        )
+        
+        # Add other images
+        if others:
+            add_gallery_group(
+                others,
+                "Additional Visualizations",
+                "Other noise-related visualizations.",
+                max_images=4
+            )
         
         return story
     
@@ -859,7 +924,7 @@ class PDFReportBuilder:
         return story
     
     def _build_mode_comparison_section(self, figure_paths: List[str]) -> List:
-        """Build mode comparison (automatic vs prompt_bbox) plots section."""
+        """Build mode comparison (automatic vs prompt_bbox) plots section with organized categories."""
         story = []
         
         # Filter for mode comparison plots
@@ -880,18 +945,54 @@ class PDFReportBuilder:
         ))
         story.append(Spacer(1, 0.5*cm))
         
-        # Add mode comparison plots
-        for i, img_path in enumerate(mode_plots[:8]):  # Limit to 8 plots
-            try:
-                img = RLImage(img_path, width=14*cm, height=9*cm)
-                story.append(img)
-                story.append(Spacer(1, 0.3*cm))
-                
-                # Page break every 2 images
-                if (i + 1) % 2 == 0 and i < len(mode_plots) - 1:
-                    story.append(PageBreak())
-            except Exception:
-                continue
+        # Categorize mode comparison plots
+        summary_plots = [p for p in mode_plots if "summary" in p.lower()]
+        grouped_plots = [p for p in mode_plots if "grouped" in p.lower() and "summary" not in p.lower()]
+        per_noise_plots = [p for p in mode_plots if p not in summary_plots + grouped_plots]
+        
+        def add_mode_plot_group(paths: List[str], title: str, description: str, max_plots: int = 6):
+            """Add a group of mode comparison plots."""
+            if not paths:
+                return
+            
+            story.append(Paragraph(title, self.styles['SubSection']))
+            story.append(Paragraph(description, self.styles['SmallText']))
+            story.append(Spacer(1, 0.3*cm))
+            
+            for i, img_path in enumerate(paths[:max_plots]):
+                try:
+                    img = RLImage(img_path, width=15*cm, height=9*cm)
+                    story.append(img)
+                    story.append(Spacer(1, 0.3*cm))
+                    
+                    if (i + 1) % 2 == 0 and i < len(paths) - 1:
+                        story.append(PageBreak())
+                except Exception:
+                    continue
+        
+        # 1. Summary plots first (overall comparison)
+        add_mode_plot_group(
+            summary_plots,
+            "Overall Mode Comparison Summary",
+            "Mean performance (±std) across all noise types for each level, comparing automatic vs prompt_bbox modes.",
+            max_plots=4
+        )
+        
+        # 2. Grouped plots (noise types at each level)
+        add_mode_plot_group(
+            grouped_plots,
+            "Mode Comparison by Level (All Noise Types)",
+            "Grouped bar charts showing performance for each noise type at specific levels (L0-L4), comparing modes.",
+            max_plots=8
+        )
+        
+        # 3. Per-noise plots
+        add_mode_plot_group(
+            per_noise_plots,
+            "Mode Comparison per Noise Type",
+            "Detailed comparison curves for each individual noise type across all levels.",
+            max_plots=6
+        )
         
         return story
     

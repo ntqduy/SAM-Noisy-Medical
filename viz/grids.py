@@ -1211,3 +1211,299 @@ def create_noise_effect_comparison(
     paths.append(str(out_pdf))
     
     return paths
+
+
+def create_comprehensive_noise_comparison(
+    df: pd.DataFrame,
+    cfg: dict,
+    out_dir: Path,
+    sample_id: str,
+    levels: List[str] = ["L0", "L1", "L2", "L3", "L4"],
+) -> List[str]:
+    """
+    Create a comprehensive comparison image showing:
+    - All noise types as rows
+    - All levels (L0-L4) as columns
+    - Shows noisy image + prediction overlay + metrics
+    
+    Returns list of saved image paths.
+    """
+    out_dir = Path(out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    paths = []
+    
+    # Get all noise types
+    noise_types = cfg.get("noises", {}).get("phase1_required", [])
+    if not noise_types:
+        noise_types = df["noise"].dropna().unique().tolist()
+        noise_types = [n for n in noise_types if n != "clean"]
+    
+    if not noise_types:
+        return paths
+    
+    noise_seed = cfg.get("noise_config", {}).get("base_seed", 42)
+    
+    # Get baseline row
+    base = df[(df["id"] == sample_id) & (df["protocol"] == "P0")]
+    if len(base) == 0:
+        return paths
+    
+    r0 = base.iloc[0]
+    dataset = r0["dataset"]
+    img = _safe_read_gray(r0["img_path"])
+    gt = _safe_read_mask(r0["mask_path"])
+    
+    if img is None or gt is None:
+        return paths
+    
+    n_rows = len(noise_types)
+    n_cols = len(levels)
+    
+    # Create figure with 2 sub-rows per noise (image + overlay)
+    fig, axes = plt.subplots(n_rows * 2, n_cols, figsize=(3 * n_cols, 2.5 * n_rows))
+    
+    # Ensure axes is 2D
+    if n_rows == 1 and n_cols == 1:
+        axes = np.array([[axes]])
+    elif n_rows * 2 == 1:
+        axes = axes.reshape(1, -1)
+    elif n_cols == 1:
+        axes = axes.reshape(-1, 1)
+    
+    for i, noise in enumerate(noise_types):
+        for j, lv in enumerate(levels):
+            ax_img = axes[i * 2, j]  # Image row
+            ax_overlay = axes[i * 2 + 1, j]  # Overlay row
+            
+            if lv == "L0":
+                # L0 is clean baseline
+                ax_img.imshow(img, cmap="gray")
+                
+                # Get prediction for L0
+                pred = _resolve_pred_and_read(df, cfg, sample_id, "P0", "clean", "L0", noise_seed, gt.shape)
+                ax_overlay.imshow(overlay(img, pred))
+                
+                # Get metrics
+                dice = r0.get("dice", None)
+                if dice is not None and not np.isnan(dice):
+                    ax_overlay.text(0.02, 0.02, f"D:{dice:.2f}", transform=ax_overlay.transAxes,
+                                   fontsize=7, va='bottom', color='white',
+                                   bbox=dict(facecolor='black', alpha=0.6))
+            else:
+                # Get noisy row
+                rows = df[
+                    (df["id"] == sample_id) &
+                    (df["protocol"] == "P1") &
+                    (df["level"] == lv) &
+                    (df["noise"] == noise)
+                ]
+                
+                if len(rows) > 0:
+                    row = rows.iloc[0]
+                    
+                    # Load noisy image
+                    noisy_img = _resolve_image_for_level(cfg, dataset, noise, lv, sample_id, noise_seed, r0["img_path"])
+                    if noisy_img is None:
+                        noisy_img = img
+                    
+                    ax_img.imshow(noisy_img, cmap="gray")
+                    
+                    # Get prediction
+                    pred = _resolve_pred_and_read(df, cfg, sample_id, "P1", noise, lv, noise_seed, gt.shape)
+                    ax_overlay.imshow(overlay(noisy_img, pred))
+                    
+                    # Show metrics
+                    dice = row.get("dice", None)
+                    psnr = row.get("psnr", None)
+                    info = []
+                    if dice is not None and not np.isnan(dice):
+                        info.append(f"D:{dice:.2f}")
+                    if psnr is not None and not np.isnan(psnr):
+                        info.append(f"P:{psnr:.0f}")
+                    
+                    if info:
+                        ax_overlay.text(0.02, 0.02, "|".join(info), transform=ax_overlay.transAxes,
+                                       fontsize=6, va='bottom', color='white',
+                                       bbox=dict(facecolor='black', alpha=0.6))
+                else:
+                    ax_img.imshow(np.zeros_like(img), cmap="gray")
+                    ax_overlay.imshow(np.zeros((img.shape[0], img.shape[1], 3), dtype=np.uint8))
+            
+            ax_img.axis("off")
+            ax_overlay.axis("off")
+            
+            # Column titles (only for first row)
+            if i == 0:
+                ax_img.set_title(lv, fontsize=10, fontweight='bold')
+            
+            # Row labels (only for first column)
+            if j == 0:
+                ax_img.text(-0.15, 0.5, f"{noise}\n(img)", transform=ax_img.transAxes,
+                           fontsize=8, rotation=90, va='center', ha='center')
+                ax_overlay.text(-0.15, 0.5, "(pred)", transform=ax_overlay.transAxes,
+                               fontsize=8, rotation=90, va='center', ha='center')
+    
+    plt.suptitle(f"Comprehensive Noise Comparison: {sample_id}", fontsize=12, fontweight='bold', y=1.02)
+    plt.tight_layout()
+    
+    out_png = out_dir / f"comprehensive_comparison_{sample_id}.png"
+    plt.savefig(out_png, dpi=150, bbox_inches='tight')
+    plt.close()
+    paths.append(str(out_png))
+    
+    return paths
+
+
+def _resolve_pred_and_read(df, cfg, sample_id, protocol, noise, level, noise_seed, shape):
+    """Helper to resolve and read prediction mask."""
+    rows = df[(df["id"] == sample_id) & (df["protocol"] == protocol)]
+    if protocol == "P1":
+        rows = rows[(rows["noise"] == noise) & (rows["level"] == level)]
+    
+    if len(rows) == 0:
+        return np.zeros(shape, dtype=np.uint8)
+    
+    row = rows.iloc[0]
+    result = _resolve_pred_for_row(row, cfg, sample_id, noise_seed)
+    
+    if result.found:
+        pred = _safe_read_mask(str(result.path))
+        if pred is not None:
+            return pred
+    
+    return np.zeros(shape, dtype=np.uint8)
+
+
+def create_noise_type_gallery(
+    df: pd.DataFrame,
+    cfg: dict,
+    out_dir: Path,
+    noise_type: str,
+    num_samples: int = 4,
+    levels: List[str] = ["L0", "L1", "L2", "L3", "L4"],
+) -> List[str]:
+    """
+    Create a gallery showing multiple samples for a single noise type across levels.
+    
+    Each row = one sample
+    Each column = one level
+    
+    Returns list of saved image paths.
+    """
+    out_dir = Path(out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    paths = []
+    
+    noise_seed = cfg.get("noise_config", {}).get("base_seed", 42)
+    
+    # Get sample IDs
+    base = df[df["protocol"] == "P0"]
+    sample_ids = base["id"].dropna().unique().tolist()[:num_samples]
+    
+    if not sample_ids:
+        return paths
+    
+    n_samples = len(sample_ids)
+    n_levels = len(levels)
+    
+    fig, axes = plt.subplots(n_samples, n_levels, figsize=(2.5 * n_levels, 2.5 * n_samples))
+    
+    if n_samples == 1:
+        axes = axes.reshape(1, -1)
+    if n_levels == 1:
+        axes = axes.reshape(-1, 1)
+    
+    for i, sid in enumerate(sample_ids):
+        r0 = base[base["id"] == sid]
+        if len(r0) == 0:
+            continue
+        r0 = r0.iloc[0]
+        
+        dataset = r0["dataset"]
+        img = _safe_read_gray(r0["img_path"])
+        gt = _safe_read_mask(r0["mask_path"])
+        
+        if img is None:
+            continue
+        
+        for j, lv in enumerate(levels):
+            ax = axes[i, j]
+            
+            if lv == "L0":
+                ax.imshow(img, cmap="gray")
+                dice = r0.get("dice", None)
+            else:
+                rows = df[
+                    (df["id"] == sid) &
+                    (df["protocol"] == "P1") &
+                    (df["level"] == lv) &
+                    (df["noise"] == noise_type)
+                ]
+                
+                if len(rows) > 0:
+                    row = rows.iloc[0]
+                    noisy_img = _resolve_image_for_level(cfg, dataset, noise_type, lv, sid, noise_seed, r0["img_path"])
+                    if noisy_img is None:
+                        noisy_img = img
+                    ax.imshow(noisy_img, cmap="gray")
+                    dice = row.get("dice", None)
+                else:
+                    ax.imshow(img, cmap="gray")
+                    dice = None
+            
+            ax.axis("off")
+            
+            # Show dice score
+            if dice is not None and not np.isnan(dice):
+                color = 'green' if dice > 0.8 else ('orange' if dice > 0.5 else 'red')
+                ax.text(0.02, 0.98, f"Dice: {dice:.2f}", transform=ax.transAxes,
+                       fontsize=8, va='top', color=color, fontweight='bold',
+                       bbox=dict(facecolor='white', alpha=0.7))
+            
+            # Column titles
+            if i == 0:
+                ax.set_title(lv, fontsize=10, fontweight='bold')
+            
+            # Row labels
+            if j == 0:
+                ax.text(-0.1, 0.5, sid[:15], transform=ax.transAxes,
+                       fontsize=8, rotation=90, va='center', ha='center')
+    
+    plt.suptitle(f"Noise Type Gallery: {noise_type}", fontsize=14, fontweight='bold', y=1.02)
+    plt.tight_layout()
+    
+    out_png = out_dir / f"noise_gallery_{noise_type}.png"
+    plt.savefig(out_png, dpi=150, bbox_inches='tight')
+    plt.close()
+    paths.append(str(out_png))
+    
+    return paths
+
+
+def create_all_noise_galleries(
+    df: pd.DataFrame,
+    cfg: dict,
+    out_dir: Path,
+    num_samples: int = 4,
+    levels: List[str] = ["L0", "L1", "L2", "L3", "L4"],
+) -> List[str]:
+    """
+    Create galleries for all noise types.
+    
+    Returns list of all saved image paths.
+    """
+    out_dir = Path(out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    all_paths = []
+    
+    # Get noise types
+    noise_types = cfg.get("noises", {}).get("phase1_required", [])
+    if not noise_types:
+        noise_types = df["noise"].dropna().unique().tolist()
+        noise_types = [n for n in noise_types if n != "clean"]
+    
+    for noise_type in noise_types:
+        paths = create_noise_type_gallery(df, cfg, out_dir, noise_type, num_samples, levels)
+        all_paths.extend(paths)
+    
+    return all_paths

@@ -10,7 +10,7 @@
   "verbose": true,
   "phase": 1,
   "cache": {
-    "enabled": true,
+    "enabled": false,
     "cache_dir": null,
     "clear_on_start": false,
     "use_cache": true,
@@ -19,8 +19,8 @@
     "skip_inference": false
   },
   "debug": {
-    "enabled": true,
-    "max_samples": 5,
+    "enabled": false,
+    "max_samples": null,
     "noise_types": null,
     "levels": null,
     "max_models": null
@@ -302,5 +302,6 @@
       "L4"
     ],
     "save_prob_maps": false
-  }
+  },
+  "only_report": true
 }

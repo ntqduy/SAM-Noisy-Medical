@@ -377,6 +377,210 @@ def plot_mode_comparison(
     return paths
 
 
+def plot_mode_comparison_grouped(
+    df: pd.DataFrame,
+    out_dir: Path,
+    metric: str = "dice",
+    protocols: List[str] = None,
+    cfg: Dict[str, Any] = None
+) -> List[str]:
+    """
+    Plot grouped bar chart comparing modes across all noise types at each level.
+    
+    Creates:
+    1. Grouped bar chart: noise types grouped, bars for each mode
+    2. Level-wise comparison: one plot per level showing all noise types
+    3. Overall summary: comparing mean performance by mode across all noise types
+    
+    Args:
+        df: Results DataFrame
+        out_dir: Output directory
+        metric: Metric to compare (default: "dice")
+        protocols: Protocols to include (default: ["P1"])
+        cfg: Configuration dictionary
+        
+    Returns:
+        List of saved plot paths
+    """
+    out_dir = Path(out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    
+    out_dir_png = out_dir / "plot_png"
+    out_dir_png.mkdir(parents=True, exist_ok=True)
+    out_dir_pdf = out_dir / "plot_pdf"
+    out_dir_pdf.mkdir(parents=True, exist_ok=True)
+    
+    paths = []
+    
+    if protocols is None:
+        protocols = ["P1"]
+    
+    df = _add_intensity_scalars_to_df(df, cfg)
+    
+    # Get P1 data and P0 baseline
+    sub = df[df["protocol"].isin(protocols)].copy()
+    sub_p0 = df[df["protocol"] == "P0"].copy()
+    
+    if len(sub) == 0 or metric not in sub.columns:
+        return paths
+    
+    level_order = ["L0", "L1", "L2", "L3", "L4"]
+    modes = sorted(sub["mode"].unique())
+    noise_types = sorted([n for n in sub["noise"].unique() if n != "clean"])
+    
+    if len(modes) < 2:
+        return paths
+    
+    mode_colors = {"automatic": "#3498db", "prompt_bbox": "#e74c3c", "prompt_point": "#2ecc71"}
+    
+    # Plot 1: Grouped bar chart - all noise types, grouped by level, bars for each mode
+    for (dataset, model, weight), g in sub.groupby(["dataset", "model", "weight"]):
+        # Prepare data: for each noise type and level, get mean metric for each mode
+        plot_data = []
+        
+        for noise in noise_types:
+            for level in level_order[1:]:  # L1 to L4
+                noise_level_data = g[(g["noise"] == noise) & (g["level"] == level)]
+                for mode in modes:
+                    mode_val = noise_level_data[noise_level_data["mode"] == mode][metric].mean()
+                    if not np.isnan(mode_val):
+                        plot_data.append({
+                            "noise": noise,
+                            "level": level,
+                            "mode": mode,
+                            metric: mode_val
+                        })
+            
+            # Add L0 from P0
+            p0_subset = sub_p0[
+                (sub_p0["dataset"] == dataset) &
+                (sub_p0["model"] == model) &
+                (sub_p0["weight"] == weight)
+            ]
+            for mode in modes:
+                p0_mode = p0_subset[p0_subset["mode"] == mode]
+                if len(p0_mode) > 0:
+                    l0_val = p0_mode[metric].mean()
+                    plot_data.append({
+                        "noise": noise,
+                        "level": "L0",
+                        "mode": mode,
+                        metric: l0_val
+                    })
+        
+        if not plot_data:
+            continue
+        
+        plot_df = pd.DataFrame(plot_data)
+        
+        # Plot 1a: For each level, grouped bar chart with noise types
+        for level in level_order:
+            level_df = plot_df[plot_df["level"] == level]
+            if len(level_df) == 0:
+                continue
+            
+            pivot = level_df.pivot_table(index="noise", columns="mode", values=metric, aggfunc="mean")
+            if pivot.empty:
+                continue
+            
+            # Reorder modes
+            pivot = pivot[[m for m in modes if m in pivot.columns]]
+            
+            fig, ax = plt.subplots(figsize=(12, 6))
+            x = np.arange(len(pivot.index))
+            width = 0.35
+            n_modes = len(pivot.columns)
+            
+            for i, mode in enumerate(pivot.columns):
+                offset = (i - (n_modes - 1) / 2) * width
+                color = mode_colors.get(mode, f"C{i}")
+                bars = ax.bar(x + offset, pivot[mode].values, width, label=mode, color=color, alpha=0.8)
+                
+                # Add value labels
+                for bar, val in zip(bars, pivot[mode].values):
+                    if not np.isnan(val):
+                        ax.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 0.01,
+                               f'{val:.2f}', ha='center', va='bottom', fontsize=7, rotation=0)
+            
+            ax.set_xlabel("Noise Type", fontsize=11)
+            ax.set_ylabel(metric.upper(), fontsize=11)
+            ax.set_title(f"Mode Comparison at {level} — {dataset} | {model}/{weight}", fontsize=11)
+            ax.set_xticks(x)
+            ax.set_xticklabels(pivot.index, rotation=45, ha='right')
+            ax.legend(loc='upper right')
+            ax.set_ylim(0, 1.1)
+            ax.grid(True, alpha=0.3, axis='y')
+            
+            out_png = out_dir_png / f"mode_comparison_grouped_{metric}_{level}_{dataset}_{model}-{weight}.png"
+            out_pdf = out_dir_pdf / f"mode_comparison_grouped_{metric}_{level}_{dataset}_{model}-{weight}.pdf"
+            plt.tight_layout()
+            plt.savefig(out_png, dpi=160)
+            plt.savefig(out_pdf, bbox_inches='tight')
+            plt.close()
+            paths.append(str(out_png))
+            paths.append(str(out_pdf))
+        
+        # Plot 1b: Summary - mean across all noise types for each level
+        summary_data = []
+        for level in level_order:
+            level_df = plot_df[plot_df["level"] == level]
+            for mode in modes:
+                mode_df = level_df[level_df["mode"] == mode]
+                if len(mode_df) > 0:
+                    mean_val = mode_df[metric].mean()
+                    std_val = mode_df[metric].std()
+                    summary_data.append({
+                        "level": level,
+                        "mode": mode,
+                        f"{metric}_mean": mean_val,
+                        f"{metric}_std": std_val
+                    })
+        
+        if summary_data:
+            summary_df = pd.DataFrame(summary_data)
+            
+            fig, ax = plt.subplots(figsize=(10, 6))
+            
+            for mode in modes:
+                mode_summary = summary_df[summary_df["mode"] == mode]
+                if len(mode_summary) == 0:
+                    continue
+                
+                mode_summary = mode_summary.copy()
+                mode_summary["level"] = pd.Categorical(mode_summary["level"], categories=level_order, ordered=True)
+                mode_summary = mode_summary.sort_values("level")
+                
+                color = mode_colors.get(mode, "gray")
+                ax.plot(range(len(mode_summary)), mode_summary[f"{metric}_mean"].values,
+                       marker='o', label=mode, color=color, linewidth=2, markersize=8)
+                ax.fill_between(
+                    range(len(mode_summary)),
+                    mode_summary[f"{metric}_mean"].values - mode_summary[f"{metric}_std"].values,
+                    mode_summary[f"{metric}_mean"].values + mode_summary[f"{metric}_std"].values,
+                    alpha=0.2, color=color
+                )
+            
+            ax.set_xlabel("Level", fontsize=11)
+            ax.set_ylabel(f"Mean {metric.upper()} (±std across noise types)", fontsize=11)
+            ax.set_title(f"Mode Comparison Summary — {dataset} | {model}/{weight}", fontsize=11)
+            ax.set_xticks(range(len(level_order)))
+            ax.set_xticklabels(level_order)
+            ax.legend(loc='lower left')
+            ax.set_ylim(0, 1.05)
+            ax.grid(True, alpha=0.3)
+            
+            out_png = out_dir_png / f"mode_comparison_summary_{metric}_{dataset}_{model}-{weight}.png"
+            out_pdf = out_dir_pdf / f"mode_comparison_summary_{metric}_{dataset}_{model}-{weight}.pdf"
+            plt.tight_layout()
+            plt.savefig(out_png, dpi=160)
+            plt.savefig(out_pdf, bbox_inches='tight')
+            plt.close()
+            paths.append(str(out_png))
+            paths.append(str(out_pdf))
+    
+    return paths
+
+
 def plot_ofat_sensitivity(df: pd.DataFrame, out_dir: Path, metrics: List[str], protocols: List[str]) -> List[str]:
     out_dir.mkdir(parents=True, exist_ok=True)
 
@@ -756,7 +960,10 @@ def plot_global_sensitivity(
         paths.append(str(out_pdf))
     
     # 2. Sensitivity curves: metric vs intensity_scalar (from config)
+    # IMPORTANT: Include L0 from P0 baseline data
     level_order_all = ["L0", "L1", "L2", "L3", "L4"]
+    p0_data = df[df["protocol"] == "P0"].copy()
+    
     for (dataset, model, weight, mode), g in sub.groupby(["dataset", "model", "weight", "mode"]):
         plt.figure(figsize=(12, 6))
         
@@ -765,6 +972,20 @@ def plot_global_sensitivity(
             # Group by level and map to intensity_scalar from config
             agg = noise_data.groupby("level")[metric].mean().reset_index()
             agg = agg[agg["level"].isin(level_order_all)].copy()
+            
+            # Add L0 from P0 baseline (clean)
+            p0_subset = p0_data[
+                (p0_data["dataset"] == dataset) &
+                (p0_data["model"] == model) &
+                (p0_data["weight"] == weight) &
+                (p0_data["mode"] == mode)
+            ]
+            if len(p0_subset) > 0 and metric in p0_subset.columns:
+                l0_value = p0_subset[metric].mean()
+                l0_row = pd.DataFrame({"level": ["L0"], metric: [l0_value]})
+                # Check if L0 already exists
+                if "L0" not in agg["level"].values:
+                    agg = pd.concat([l0_row, agg], ignore_index=True)
             
             if len(agg) > 1:
                 # Map level to intensity scalar from config
