@@ -30,11 +30,11 @@ from model.registry import build_model_runner
 from noises.registry import build_noise
 from noises.base import NoiseResult
 
-from viz.grids import save_preview_pdf, save_noise_gallery
+from viz.grids import save_preview_pdf, save_noise_gallery, create_noise_comparison_grid
 from viz.plots import (
     plot_metric_vs_level, plot_model_comparison, plot_ofat_sensitivity, plot_grid_heatmap,
     plot_global_sensitivity, plot_psnr_vs_performance, plot_stability_summary, plot_summary_heatmap,
-    plot_noise_comparison, plot_uncertainty_vs_performance, create_noise_comparison_grid
+    plot_noise_comparison, plot_uncertainty_vs_performance
 )
 from viz.failure_cases import analyze_failure_patterns, export_failure_cases
 from reports.pdf_builder import build_report_pdf

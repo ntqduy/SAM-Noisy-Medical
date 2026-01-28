@@ -12,15 +12,15 @@
   "cache": {
     "enabled": true,
     "cache_dir": null,
-    "clear_on_start": true,
+    "clear_on_start": false,
     "use_cache": true,
     "overwrite_cache": false,
     "only_report": false,
     "skip_inference": false
   },
   "debug": {
-    "enabled": false,
-    "max_samples": null,
+    "enabled": true,
+    "max_samples": 20,
     "noise_types": null,
     "levels": null,
     "max_models": null
@@ -268,14 +268,24 @@
     "num_preview_samples": 8,
     "preview_levels": [
       "L0",
+      "L1",
       "L2",
+      "L3",
       "L4"
     ],
     "num_failure_cases": 8,
     "num_gallery_samples": 3,
     "figures_dpi": 160,
     "generate_global_plots": true,
-    "save_prob_maps": false,
-    "noise_gallery_samples": 3
+    "noise_gallery_samples": 5,
+    "noise_gallery_levels": [
+      "L0",
+      "L1",
+      "L2",
+      "L3",
+      "L4"
+    ],
+    "save_noisy_images": true,
+    "save_prob_maps": false
   }
 }
