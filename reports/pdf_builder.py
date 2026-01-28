@@ -39,11 +39,19 @@ from reportlab.lib import colors
 class PDFReportBuilder:
     """Build comprehensive PDF reports for benchmark results."""
     
+    # Supported image extensions for RLImage
+    IMAGE_EXTENSIONS = {'.png', '.jpg', '.jpeg', '.gif', '.bmp', '.tiff'}
+    
     def __init__(self, cfg: dict, exp_dir: Path):
         self.cfg = cfg
         self.exp_dir = Path(exp_dir)
         self.styles = getSampleStyleSheet()
         self._setup_styles()
+    
+    def _is_valid_image(self, path: str) -> bool:
+        """Check if path is a valid image file (not PDF)."""
+        p = Path(path)
+        return p.suffix.lower() in self.IMAGE_EXTENSIONS and p.exists()
     
     def _setup_styles(self):
         """Setup custom paragraph styles."""
@@ -633,11 +641,11 @@ class PDFReportBuilder:
         ))
         story.append(Spacer(1, 0.5*cm))
         
+        # Filter to only valid image files (not PDFs)
+        valid_gallery_paths = [p for p in gallery_paths if self._is_valid_image(p)]
+        
         # Add gallery images
-        for i, img_path in enumerate(gallery_paths[:6]):  # Limit to 6 galleries
-            if not Path(img_path).exists():
-                continue
-            
+        for i, img_path in enumerate(valid_gallery_paths[:6]):  # Limit to 6 galleries
             try:
                 # Determine if it's a wide or tall image
                 img = RLImage(img_path, width=16*cm, height=12*cm)
@@ -645,7 +653,7 @@ class PDFReportBuilder:
                 story.append(Spacer(1, 0.5*cm))
                 
                 # Page break after every image (galleries are large)
-                if i < len(gallery_paths) - 1:
+                if i < len(valid_gallery_paths) - 1:
                     story.append(PageBreak())
             except Exception:
                 continue
@@ -669,19 +677,20 @@ class PDFReportBuilder:
         ))
         story.append(Spacer(1, 0.5*cm))
         
+        # Filter to only valid image files
+        valid_plot_paths = [p for p in plot_paths if self._is_valid_image(p)]
+        
         # Categorize plots by type
-        heatmaps = [p for p in plot_paths if "heatmap" in p.lower()]
-        rankings = [p for p in plot_paths if "ranking" in p.lower()]
-        curves = [p for p in plot_paths if "curve" in p.lower()]
-        others = [p for p in plot_paths if p not in heatmaps + rankings + curves]
+        heatmaps = [p for p in valid_plot_paths if "heatmap" in p.lower()]
+        rankings = [p for p in valid_plot_paths if "ranking" in p.lower()]
+        curves = [p for p in valid_plot_paths if "curve" in p.lower()]
+        others = [p for p in valid_plot_paths if p not in heatmaps + rankings + curves]
         
         def add_plot_group(paths: List[str], title: str, max_plots: int = 4):
             if not paths:
                 return
             story.append(Paragraph(title, self.styles['SubSection']))
             for i, img_path in enumerate(paths[:max_plots]):
-                if not Path(img_path).exists():
-                    continue
                 try:
                     img = RLImage(img_path, width=14*cm, height=8*cm)
                     story.append(img)
@@ -709,18 +718,26 @@ class PDFReportBuilder:
             story.append(Paragraph("No plots generated.", self.styles['MyBodyText']))
             return story
         
-        # Add up to 6 plots
-        for i, fig_path in enumerate(figure_paths[:12]):
-            if not Path(fig_path).exists():
-                continue
-            
+        # Filter to only include image files (not PDFs)
+        image_extensions = {'.png', '.jpg', '.jpeg', '.gif', '.bmp', '.tiff'}
+        valid_figure_paths = [
+            p for p in figure_paths 
+            if Path(p).suffix.lower() in image_extensions and Path(p).exists()
+        ]
+        
+        if not valid_figure_paths:
+            story.append(Paragraph("No image plots found (only PDF plots available).", self.styles['MyBodyText']))
+            return story
+        
+        # Add up to 12 plots
+        for i, fig_path in enumerate(valid_figure_paths[:12]):
             try:
                 img = RLImage(fig_path, width=14*cm, height=8*cm)
                 story.append(img)
                 story.append(Spacer(1, 0.5*cm))
                 
                 # Add page break every 2 images
-                if (i + 1) % 2 == 0 and i < len(figure_paths) - 1:
+                if (i + 1) % 2 == 0 and i < len(valid_figure_paths) - 1:
                     story.append(PageBreak())
             except Exception:
                 continue
@@ -744,10 +761,10 @@ class PDFReportBuilder:
             story.append(Paragraph("No failure cases to display.", self.styles['MyBodyText']))
             return story
         
-        for i, fail_path in enumerate(failure_paths[:8]):
-            if not Path(fail_path).exists():
-                continue
-            
+        # Filter to only valid image files
+        valid_failure_paths = [p for p in failure_paths if self._is_valid_image(p)]
+        
+        for i, fail_path in enumerate(valid_failure_paths[:8]):
             try:
                 img = RLImage(fail_path, width=16*cm, height=5*cm)
                 story.append(img)
