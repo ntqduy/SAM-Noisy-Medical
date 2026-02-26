@@ -85,7 +85,7 @@ noise_config:
   base_seed: 42           # Base seed for noise generation
 
 protocols:
-  enabled: ["P0", "P1", "P2"]  # P3 optional
+  enabled: ["P0", "P1", "P2"]
   coupled_presets:
     # P1: coupled levels (p + severity đều tăng)
     gaussian: {L1: {p: 0.3, sigma: 5},  L2: {p: 0.6, sigma: 10}, L3: {p: 0.8, sigma: 18}, L4: {p: 1.0, sigma: 28}}
@@ -95,10 +95,13 @@ protocols:
     bias_field: {L1: {p: 0.3, strength: 0.2, smooth: 48}, L2: {p: 0.6, strength: 0.35, smooth: 64}, L3: {p: 0.8, strength: 0.55, smooth: 96}, L4: {p: 1.0, strength: 0.8, smooth: 128}}
     low_contrast: {L1: {p: 0.3, alpha: 0.85, beta: 0.0}, L2: {p: 0.6, alpha: 0.75, beta: 0.0}, L3: {p: 0.8, alpha: 0.65, beta: 0.0}, L4: {p: 1.0, alpha: 0.50, beta: 0.0}}
 
+  
+  # P2: OFAT (One-Factor-At-a-Time) settings
   ofat:
-    # P2a: sweep severity (p cố định)
-    p_fixed: 0.8
-    severity_ref_level: "L3"
+    p_fixed: 0.8               # Fixed probability for P2a
+    severity_ref_level: "L3"   # Reference severity level for P2b
+
+  # P3: Grid search (enabled for Phase 2)
   grid:
     enabled: false
     p_values: [0.2, 0.5, 0.8]
