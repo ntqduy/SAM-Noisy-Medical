@@ -27,8 +27,8 @@ debug:
 datasets:
   - name: "montgomery"
     adapter: "ImageMaskFolderAdapter"
-    # root: "/content/Montgomery/Montgomery"
-    root: "./data/montgomery"
+    root: "/content/Montgomery/Montgomery"
+    # root: "./data/montgomery"
     image_dir: "img"
     mask_dir: "mask"
     image_exts: [".png", ".jpg", ".jpeg"]
@@ -49,16 +49,16 @@ datasets:
 models:
   - name: "SAM"
     runner: "SAM1"
-    mode: ["prompt_bbox", "automatic"]
+    mode: ["prompt_bbox"]
     weights:
       - id: "sam_b"
         # checkpoint: "/content/sam_b.pt"
         checkpoint: "weights/sam_vit_b_01ec64.pth"
         model_type: "vit_b"
-      - id: "sam_l"
+      # - id: "sam_l"
         # checkpoint: "/content/sam_l.pt"
-        checkpoint: "weights/sam_vit_l_0b3195.pth"
-        model_type: "vit_l"
+      #  checkpoint: "weights/sam_vit_l_0b3195.pth"
+      #  model_type: "vit_l"
 
 inference:
   image_rgb: "repeat_gray_3ch"
@@ -70,7 +70,7 @@ noises:
   phase2_optional: ["speckle", "uniform", "jpeg", "quantization", "defocus_blur", "coarse_dropout", "gridmask"]
 
 levels:
-  names: ["L0", "L1", "L2", "L3", "L4"]
+  names: ["L0", "L1", "L2", "L3", "L4", "L5", "L6", "L7", "L8", "L9"]
   # Intensity scalars for each level (used for normalization and plotting)
   intensity_scalars:
     L0: 0.0
@@ -78,6 +78,12 @@ levels:
     L2: 0.50
     L3: 0.75
     L4: 1.0
+    L5: 1.0
+    L6: 1.0
+    L7: 1.0
+    L8: 1.0
+    L9: 1.0
+
 
 # Noise seed configuration for reproducibility studies
 noise_config:
@@ -85,17 +91,16 @@ noise_config:
   base_seed: 42           # Base seed for noise generation
 
 protocols:
-  enabled: ["P0", "P1", "P2"]
+  enabled: ["P0", "P1"]
   coupled_presets:
     # P1: coupled levels (p + severity đều tăng)
-    gaussian: {L1: {p: 0.3, sigma: 5},  L2: {p: 0.6, sigma: 10}, L3: {p: 0.8, sigma: 18}, L4: {p: 1.0, sigma: 28}}
-    poisson:  {L1: {p: 0.3, lam: 8},   L2: {p: 0.6, lam: 15},  L3: {p: 0.8, lam: 25},  L4: {p: 1.0, lam: 40}}
-    salt_pepper: {L1: {p: 0.3, amount: 0.005}, L2: {p: 0.6, amount: 0.01}, L3: {p: 0.8, amount: 0.02}, L4: {p: 1.0, amount: 0.04}}
-    motion_blur: {L1: {p: 0.3, k: 5, angle: 10}, L2: {p: 0.6, k: 9, angle: 15}, L3: {p: 0.8, k: 13, angle: 20}, L4: {p: 1.0, k: 17, angle: 25}}
-    bias_field: {L1: {p: 0.3, strength: 0.2, smooth: 48}, L2: {p: 0.6, strength: 0.35, smooth: 64}, L3: {p: 0.8, strength: 0.55, smooth: 96}, L4: {p: 1.0, strength: 0.8, smooth: 128}}
-    low_contrast: {L1: {p: 0.3, alpha: 0.85, beta: 0.0}, L2: {p: 0.6, alpha: 0.75, beta: 0.0}, L3: {p: 0.8, alpha: 0.65, beta: 0.0}, L4: {p: 1.0, alpha: 0.50, beta: 0.0}}
-
-  
+    gaussian: {L1: {p: 0.3, sigma: 5}, L2: {p: 0.5, sigma: 9}, L3: {p: 0.7, sigma: 14}, L4: {p: 0.85, sigma: 20}, L5: {p: 1.0, sigma: 28}, L6: {p: 1.0, sigma: 38}, L7: {p: 1.0, sigma: 50}, L8: {p: 1.0, sigma: 65}, L9: {p: 1.0, sigma: 75}}
+    poisson: {L1: {p: 0.3, lam: 8}, L2: {p: 0.5, lam: 13}, L3: {p: 0.7, lam: 20}, L4: {p: 0.85, lam: 30}, L5: {p: 1.0, lam: 40}, L6: {p: 1.0, lam: 55}, L7: {p: 1.0, lam: 75}, L8: {p: 1.0, lam: 100}, L9: {p: 1.0, lam: 120}}
+    salt_pepper: {L1: {p: 0.3, amount: 0.005}, L2: {p: 0.5, amount: 0.008}, L3: {p: 0.7, amount: 0.012}, L4: {p: 0.85, amount: 0.020}, L5: {p: 1.0, amount: 0.032}, L6: {p: 1.0, amount: 0.050}, L7: {p: 1.0, amount: 0.080}, L8: {p: 1.0, amount: 0.120}, L: {p: 1.0, amount: 0.2}}
+    motion_blur: {L1: {p: 0.3, k: 5, angle: 10}, L2: {p: 0.5, k: 7, angle: 12}, L3: {p: 0.7, k: 9, angle: 15}, L4: {p: 0.85, k: 13, angle: 20}, L5: {p: 1.0, k: 17, angle: 25}, L6: {p: 1.0, k: 23, angle: 30}, L7: {p: 1.0, k: 31, angle: 45}, L8: {p: 1.0, k: 39, angle: 60}, L9: {p: 1.0, k: 45, angle: 90}}
+    bias_field: {L1: {p: 0.3, strength: 0.20, smooth: 48}, L2: {p: 0.5, strength: 0.30, smooth: 56}, L3: {p: 0.7, strength: 0.45, smooth: 72}, L4: {p: 0.85, strength: 0.60, smooth: 96}, L5: {p: 1.0, strength: 0.80, smooth: 128}, L6: {p: 1.0, strength: 1.00, smooth: 160}, L7: {p: 1.0, strength: 1.25, smooth: 192}, L8: {p: 1.0, strength: 1.50, smooth: 224}, L9: {p: 1.0, strength: 2.0, smooth: 230}}
+    low_contrast: {L1: {p: 0.3, alpha: 0.85, beta: 0.0}, L2: {p: 0.5, alpha: 0.78, beta: 0.0}, L3: {p: 0.7, alpha: 0.70, beta: 0.0}, L4: {p: 0.85, alpha: 0.60, beta: 0.0}, L5: {p: 1.0, alpha: 0.50, beta: 0.0}, L6: {p: 1.0, alpha: 0.40, beta: 0.0}, L7: {p: 1.0, alpha: 0.30, beta: 0.0}, L8: {p: 1.0, alpha: 0.20, beta: 0.0}, L9: {p: 1.0, alpha: 0.1, beta: 0.0}}
+      
   # P2: OFAT (One-Factor-At-a-Time) settings
   ofat:
     p_fixed: 0.8               # Fixed probability for P2a
@@ -110,15 +115,15 @@ protocols:
 outputs:
   save_pred_masks: true
   num_preview_samples: 8
-  preview_levels: ["L0", "L1", "L2", "L3", "L4"]
+  preview_levels: ["L0", "L1", "L2", "L3", "L4", "L5", "L6", "L7", "L8", "L9"]
   num_failure_cases: 8
   num_gallery_samples: 3    # Number of samples for noise gallery visualization
   figures_dpi: 160
   generate_global_plots: true  # Generate global sensitivity plots
   noise_gallery_samples: 5  # Number of samples for noise gallery visualization
-  noise_gallery_levels: ["L0", "L1", "L2", "L3", "L4"]
+  noise_gallery_levels: ["L0", "L1", "L2", "L3", "L4", "L5", "L6", "L7", "L9"]
   save_noisy_images: true    # Save noisy images used for inference
   # NEW: Noise visualization options
   noise_viz_samples: 5       # Samples for noise visualization (overlay L0 only)
-  noise_viz_levels: ["L0", "L1", "L2", "L3", "L4"]
-  noise_effect_levels: ["L0", "L1", "L2", "L3", "L4"]  # Levels for noise effect comparison
+  noise_viz_levels: ["L0", "L1", "L2", "L3", "L4", "L5", "L6", "L7", "L8", "L9"]
+  noise_effect_levels: ["L0", "L1", "L2", "L3", "L4", "L5", "L6", "L7", "L8", "L9"]  # Levels for noise effect comparison

@@ -2,6 +2,7 @@
 *.pth
 *.pt
 Montgomery/
+Shenzhen/
 __pycache__/
 *.pyc
 logs/
