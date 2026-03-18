@@ -5,6 +5,7 @@
 # LICENSE file in the root directory of this source tree.
 
 import math
+import warnings
 from typing import Any, Optional, Tuple
 
 import numpy as np
@@ -44,11 +45,18 @@ class PositionEmbeddingSine(nn.Module):
 
         self.cache = {}
         if warmup_cache and torch.cuda.is_available():
-            # Warmup cache for cuda, to help with compilation
-            device = torch.device("cuda")
-            for stride in strides:
-                cache_key = (image_size // stride, image_size // stride)
-                self._pe(1, device, *cache_key)
+            # Warmup cache for CUDA to help compilation. Skip gracefully on
+            # systems where CUDA is present but not supported by current torch build.
+            try:
+                device = torch.device("cuda")
+                for stride in strides:
+                    cache_key = (image_size // stride, image_size // stride)
+                    self._pe(1, device, *cache_key)
+            except Exception as e:
+                warnings.warn(
+                    f"Skipping SAM2 CUDA warmup cache ({e}).",
+                    RuntimeWarning,
+                )
 
     def _encode_xy(self, x, y):
         # The positions are expected to be normalized

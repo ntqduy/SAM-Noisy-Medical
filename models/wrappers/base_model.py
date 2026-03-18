@@ -111,7 +111,7 @@ class ModelRunner(ABC):
             return base
         if self.prompt_mode == "prompt_bbox":
             return apply_bbox(base, prompt.get("bbox"))
-        if self.prompt_mode == "prompt_point":
+        if self.prompt_mode in ("prompt_point", "prompt_multi_point"):
             pt = prompt.get("point") or (image.shape[1] // 2, image.shape[0] // 2)
             return component_at_point(base, pt)
         if self.prompt_mode == "prompt_point_box":

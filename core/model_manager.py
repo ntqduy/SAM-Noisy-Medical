@@ -69,7 +69,34 @@ class ModelManager:
             model_cfg=model_cfg or {},
         )
         runner.load_model()
+
+        cfg = model_cfg or {}
+        allow_fallback = bool(cfg.get("allow_fallback", False))
+        loaded_real = self._is_real_model_loaded(runner)
+        if not loaded_real and not allow_fallback:
+            raise RuntimeError(
+                "Model failed to load real weights and would fall back to heuristic output. "
+                f"model={model_name}, runner={runner.__class__.__name__}. "
+                "Set model_cfg.allow_fallback=true to bypass, but this is not recommended for benchmarking."
+            )
+        if not loaded_real and allow_fallback:
+            warnings.warn(
+                f"{model_name} is using heuristic fallback (allow_fallback=true). "
+                "Benchmark metrics may be misleading.",
+                RuntimeWarning,
+            )
         return runner
+
+    @staticmethod
+    def _is_real_model_loaded(runner: ModelRunner) -> bool:
+        """Best-effort check across wrapper conventions (_model / _predictor)."""
+        checked = False
+        for attr in ("_model", "_predictor"):
+            if hasattr(runner, attr):
+                checked = True
+                if getattr(runner, attr) is not None:
+                    return True
+        return not checked
 
     def register(self, name: str, cls: Type[ModelRunner]) -> None:
         """Register a custom model wrapper at runtime."""

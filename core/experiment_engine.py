@@ -33,6 +33,7 @@ from tqdm import tqdm
 from core.model_manager import ModelManager
 from datasets.dataset_registry import build_dataset
 from metrics.metric_manager import MetricManager
+from models.wrappers.prompt_utils import prompt_bbox_stats, resolve_prompt
 from noises.noise_manager import NoiseManager
 
 
@@ -46,6 +47,19 @@ RAW_COLUMNS = [
     "noise_level",
     "noise_seed",
     "image_id",
+    "prompt_x",
+    "prompt_y",
+    "bbox_x0",
+    "bbox_y0",
+    "bbox_x1",
+    "bbox_y1",
+    "bbox_w",
+    "bbox_h",
+    "bbox_area",
+    "gt_fg_pixels",
+    "pred_fg_pixels",
+    "is_gt_empty",
+    "is_pred_empty",
     "IoU",
     "Dice",
     "Recall",
@@ -63,6 +77,7 @@ def _slugify(name: str) -> str:
 def _prompt_suffix(prompt_mode: str) -> str:
     mapping = {
         "prompt_point": "point",
+        "prompt_multi_point": "multipoint",
         "prompt_bbox": "bbox",
         "prompt_point_box": "pointbox",
         "autogen": "autogen",
@@ -77,6 +92,14 @@ def _to_uint8_mask(mask: np.ndarray) -> np.ndarray:
     return (m > 0).astype(np.uint8)
 
 
+def _fg_stats(mask: np.ndarray) -> Dict[str, int]:
+    fg = int(np.asarray(mask).astype(bool).sum())
+    return {
+        "fg_pixels": fg,
+        "is_empty": 1 if fg == 0 else 0,
+    }
+
+
 def _sanitize_id(image_id: str) -> str:
     return re.sub(r"[^A-Za-z0-9_.-]+", "_", str(image_id))
 
@@ -84,6 +107,21 @@ def _sanitize_id(image_id: str) -> str:
 def _parse_level_idx(level: str) -> int:
     m = re.search(r"(\d+)", str(level))
     return int(m.group(1)) if m else 10**9
+
+
+def _prompt_row_fields(prompt: Dict[str, Any]) -> Dict[str, int]:
+    point = prompt.get("point")
+    bbox = prompt.get("bbox")
+    row = {
+        "prompt_x": int(point[0]) if point is not None else -1,
+        "prompt_y": int(point[1]) if point is not None else -1,
+        "bbox_x0": int(bbox[0]) if bbox is not None else -1,
+        "bbox_y0": int(bbox[1]) if bbox is not None else -1,
+        "bbox_x1": int(bbox[2]) if bbox is not None else -1,
+        "bbox_y1": int(bbox[3]) if bbox is not None else -1,
+    }
+    row.update(prompt_bbox_stats(prompt))
+    return row
 
 
 # ── noise case dataclass ────────────────────────────────────────────────
@@ -255,9 +293,18 @@ class ExperimentEngine:
                         image_id=image_id,
                     )
 
-                    pred_mask = _to_uint8_mask(
-                        runner.predict(noisy_image, prompt={"gt_mask": gt_mask})
+                    resolved_prompt = resolve_prompt(
+                        {"gt_mask": gt_mask},
+                        image.shape[:2],
+                        prompt_mode=prompt_mode,
                     )
+
+                    pred_mask = _to_uint8_mask(
+                        runner.predict(noisy_image, prompt=resolved_prompt)
+                    )
+
+                    gt_stats = _fg_stats(gt_mask)
+                    pred_stats = _fg_stats(pred_mask)
 
                     m = self.metric_manager.compute(pred_mask, gt_mask)
 
@@ -269,6 +316,11 @@ class ExperimentEngine:
                         "noise_level": case.noise_level,
                         "noise_seed": case.noise_seed,
                         "image_id": image_id,
+                        **_prompt_row_fields(resolved_prompt),
+                        "gt_fg_pixels": gt_stats["fg_pixels"],
+                        "pred_fg_pixels": pred_stats["fg_pixels"],
+                        "is_gt_empty": gt_stats["is_empty"],
+                        "is_pred_empty": pred_stats["is_empty"],
                         **m,
                     })
 

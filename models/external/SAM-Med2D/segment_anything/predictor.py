@@ -162,9 +162,10 @@ class SamPredictor:
             return_logits=return_logits,
         )
 
-        masks = masks[0].detach().cpu().numpy()
-        iou_predictions = iou_predictions[0].detach().cpu().numpy()
-        low_res_masks = low_res_masks[0].detach().cpu().numpy()
+        # bfloat16 tensors cannot be converted directly to numpy on some torch builds.
+        masks = masks[0].detach().float().cpu().numpy()
+        iou_predictions = iou_predictions[0].detach().float().cpu().numpy()
+        low_res_masks = low_res_masks[0].detach().float().cpu().numpy()
         return masks, iou_predictions, low_res_masks
 
     @torch.no_grad()

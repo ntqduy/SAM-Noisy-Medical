@@ -49,6 +49,13 @@ class MetricAggregator:
         rows: List[Dict[str, Any]] = []
         for keys, g in grouped:
             row = dict(zip(GROUP_KEYS, keys))
+            if "is_gt_empty" in g.columns:
+                gt_empty = pd.to_numeric(g["is_gt_empty"], errors="coerce").fillna(0)
+                row["gt_empty_rate"] = float(gt_empty.mean()) if len(gt_empty) else np.nan
+                row["n_gt_non_empty"] = int((gt_empty == 0).sum())
+            if "is_pred_empty" in g.columns:
+                pred_empty = pd.to_numeric(g["is_pred_empty"], errors="coerce").fillna(0)
+                row["pred_empty_rate"] = float(pred_empty.mean()) if len(pred_empty) else np.nan
             for metric in METRICS:
                 if metric not in g.columns:
                     continue
@@ -63,6 +70,7 @@ class MetricAggregator:
                 row[metric] = mean
                 row[f"{metric}_std"] = std
                 row[f"{metric}_cv_pct"] = cv_pct
+                row[f"{metric}_n_valid"] = int(len(vals))
             row["n_images"] = (
                 int(g["image_id"].nunique()) if "image_id" in g.columns else int(len(g))
             )

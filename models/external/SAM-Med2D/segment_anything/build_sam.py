@@ -110,7 +110,13 @@ def _build_sam(
     # sam.train()
     if checkpoint is not None:
         with open(checkpoint, "rb") as f:
-            state_dict = torch.load(f, map_location="cpu")
+            # PyTorch 2.6 changed torch.load default to weights_only=True.
+            # SAM-Med2D checkpoints may include non-weight objects, so load full checkpoint.
+            try:
+                state_dict = torch.load(f, map_location="cpu", weights_only=False)
+            except TypeError:
+                # Backward-compat for older torch versions without weights_only argument.
+                state_dict = torch.load(f, map_location="cpu")
         try:
             if 'model' in state_dict.keys():
                 print(encoder_adapter)

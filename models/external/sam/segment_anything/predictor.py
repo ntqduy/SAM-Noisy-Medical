@@ -160,9 +160,10 @@ class SamPredictor:
             return_logits=return_logits,
         )
 
-        masks_np = masks[0].detach().cpu().numpy()
-        iou_predictions_np = iou_predictions[0].detach().cpu().numpy()
-        low_res_masks_np = low_res_masks[0].detach().cpu().numpy()
+        # Some GPUs/torch builds return bfloat16 here, which NumPy cannot ingest directly.
+        masks_np = masks[0].detach().float().cpu().numpy()
+        iou_predictions_np = iou_predictions[0].detach().float().cpu().numpy()
+        low_res_masks_np = low_res_masks[0].detach().float().cpu().numpy()
         return masks_np, iou_predictions_np, low_res_masks_np
 
     @torch.no_grad()

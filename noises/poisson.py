@@ -11,12 +11,21 @@ class PoissonNoise(NoiseBase):
     """
     
     PARAM_RANGES = {
-        "lam": (1.0, 60.0),  # Lambda range
+        "lam": (1.0, 80.0),  # Lambda range (includes full_benchmark L1=80)
     }
     
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self._noise_type = "poisson"
+
+    def get_severity_scalar(self) -> float:
+        """Lower lambda yields stronger shot noise, so invert normalization."""
+        lam = float(self.params.get("lam", 20.0))
+        min_lam, max_lam = self.PARAM_RANGES["lam"]
+        if max_lam <= min_lam:
+            return 0.5
+        normalized = 1.0 - (lam - min_lam) / (max_lam - min_lam)
+        return float(np.clip(normalized, 0.0, 1.0))
     
     def apply(self, x: np.ndarray) -> np.ndarray:
         lam = float(self.params.get("lam", 20.0))

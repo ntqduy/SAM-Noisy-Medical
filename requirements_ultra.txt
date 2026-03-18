@@ -1,0 +1,33 @@
+# =========================
+# UltraSam requirements
+# =========================
+
+# Core deep learning stack (CUDA-specific torch wheel should be installed separately if needed)
+torch==2.0.0
+torchvision==0.15.1
+torchaudio==2.0.1
+
+# OpenMMLab ecosystem
+openmim>=0.3.9
+mmengine>=0.8.0
+mmcv==2.1.0
+mmdet>=3.0.0
+mmpretrain>=1.0.0
+
+# Core scientific and image processing deps used in UltraSam code
+numpy>=1.23
+scipy>=1.10
+pandas>=1.5
+matplotlib>=3.6
+opencv-python>=4.8
+Pillow>=9.5
+scikit-image>=0.20
+SimpleITK>=2.2
+h5py>=3.8
+shapely>=2.0
+pycocotools>=2.0.7
+tensorboard>=2.12
+hydra-core>=1.3.2
+omegaconf>=2.3.0
+iopath>=0.1.10
+huggingface_hub>=0.23

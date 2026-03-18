@@ -26,30 +26,45 @@ def _binary_counts(pred: np.ndarray, gt: np.ndarray) -> Dict[str, int]:
 # ── individual metrics ──────────────────────────────────────────────────
 
 def iou(pred: np.ndarray, gt: np.ndarray) -> float:
+    g = _as_bool(gt)
+    if not g.any():
+        return float("nan")
     c = _binary_counts(pred, gt)
     union = c["tp"] + c["fp"] + c["fn"]
     return 1.0 if union == 0 else float(c["tp"] / union)
 
 
 def dice(pred: np.ndarray, gt: np.ndarray) -> float:
+    g = _as_bool(gt)
+    if not g.any():
+        return float("nan")
     c = _binary_counts(pred, gt)
     denom = 2 * c["tp"] + c["fp"] + c["fn"]
     return 1.0 if denom == 0 else float(2 * c["tp"] / denom)
 
 
 def recall_score(pred: np.ndarray, gt: np.ndarray) -> float:
+    g = _as_bool(gt)
+    if not g.any():
+        return float("nan")
     c = _binary_counts(pred, gt)
     denom = c["tp"] + c["fn"]
     return 1.0 if denom == 0 else float(c["tp"] / denom)
 
 
 def precision_score(pred: np.ndarray, gt: np.ndarray) -> float:
+    g = _as_bool(gt)
+    if not g.any():
+        return float("nan")
     c = _binary_counts(pred, gt)
     denom = c["tp"] + c["fp"]
     return 1.0 if denom == 0 else float(c["tp"] / denom)
 
 
 def f1_score(pred: np.ndarray, gt: np.ndarray) -> float:
+    g = _as_bool(gt)
+    if not g.any():
+        return float("nan")
     p = precision_score(pred, gt)
     r = recall_score(pred, gt)
     denom = p + r
@@ -63,9 +78,9 @@ def hausdorff_distance(pred: np.ndarray, gt: np.ndarray) -> Optional[float]:
         return None
 
     p, g = _as_bool(pred), _as_bool(gt)
-    if p.sum() == 0 and g.sum() == 0:
-        return 0.0
-    if p.sum() == 0 or g.sum() == 0:
+    if g.sum() == 0:
+        return float("nan")
+    if p.sum() == 0:
         return float("inf")
 
     p_s = np.logical_xor(p, binary_erosion(p))

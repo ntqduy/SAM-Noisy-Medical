@@ -1,0 +1,1 @@
+install sam2.1_hiera_tiny.pt in github of MedSAM2

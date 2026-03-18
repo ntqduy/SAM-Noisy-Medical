@@ -17,7 +17,12 @@ from typing import Any, Dict, Optional
 import numpy as np
 
 from models.wrappers.base_model import ModelRunner
-from models.wrappers.prompt_utils import build_prompt, normalize_prompt_mode
+from models.wrappers.prompt_utils import (
+    build_sam_prompt_kwargs,
+    normalize_prompt_mode,
+    resolve_prompt,
+    select_best_mask,
+)
 
 
 class MedSAM3Runner(ModelRunner):
@@ -122,10 +127,7 @@ class MedSAM3Runner(ModelRunner):
         image: np.ndarray,
         prompt: Optional[Dict[str, Any]] = None,
     ) -> np.ndarray:
-        if prompt is None:
-            prompt = {}
-        gt_mask = prompt.get("gt_mask")
-        p = build_prompt(gt_mask, image.shape[:2])
+        p = resolve_prompt(prompt, image.shape[:2], prompt_mode=self.prompt_mode)
 
         if self._model is not None and self._processor is not None:
             return self._run_inference(image, p)
@@ -141,23 +143,9 @@ class MedSAM3Runner(ModelRunner):
         with torch.inference_mode():
             inference_state = self._processor.set_image(pil_img)
 
-            kwargs: Dict[str, Any] = {"multimask_output": False}
-            if self.prompt_mode in ("prompt_bbox", "prompt_point_box") and prompt.get("bbox"):
-                kwargs["box"] = np.array(prompt["bbox"])[None, :]
-            if self.prompt_mode in ("prompt_point", "prompt_point_box") and prompt.get("point"):
-                pt = prompt["point"]
-                kwargs["point_coords"] = np.array([[pt[0], pt[1]]])
-                kwargs["point_labels"] = np.array([1])
+            kwargs = build_sam_prompt_kwargs(self.prompt_mode, prompt, batched_box=True)
 
-            masks, _, _ = self._model.predict_inst(
+            masks, iou_predictions, _ = self._model.predict_inst(
                 inference_state, **kwargs
             )
-
-        if masks.ndim == 4:
-            mask = masks[0, 0]
-        elif masks.ndim == 3:
-            mask = masks[0]
-        else:
-            mask = masks
-
-        return (mask > 0).astype(np.uint8)
+        return select_best_mask(masks, iou_predictions)
