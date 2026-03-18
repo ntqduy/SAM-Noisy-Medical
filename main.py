@@ -1,166 +1,279 @@
-"""
-Main entry point for AIO25 NoisySAM benchmark.
+"""Main entry point for the 3-stage segmentation robustness pipeline.
 
-Extended CLI options:
-  --config       Config file path (required)
-  --phase        Override phase (1 or 2)
-  --dry_run      Print protocol cases without running
-  --limit_n      Limit number of samples
-  --use_cache    Enable prediction caching
-  --clear_cache  Clear existing cache before running
-  --only_report  Skip inference, generate report from existing results
-  --max_samples  Limit samples per protocol case
-  --max_noise    Filter to specific noise types
-  --max_level    Filter to specific levels
-  --debug        Enable debug mode (implies --use_cache)
+    Stage 1  (run)        – ExperimentEngine: run inference under noise.
+    Stage 1b (aggregate)  – StatisticsMerger: aggregate raw CSVs → stats.
+    Stage 2  (visualize)  – Viz classes: generate PDF figures & tables.
 """
+from __future__ import annotations
+
 import argparse
 from pathlib import Path
+from typing import Any, Dict, List, Optional
 
-from runner.experiment import run_experiment
-from runner.io_utils import load_yaml_config
-from runner.config_schema import apply_cli_overrides
 
+# ── stage runners ────────────────────────────────────────────────────────
+
+def _run_stage1(
+    cfg: Dict[str, Any],
+    *,
+    max_samples,
+    dataset_filter,
+    model_filter,
+    device: Optional[str] = None,
+):
+    from core.experiment_engine import ExperimentEngine
+
+    engine = ExperimentEngine(cfg, device=device)
+    summary = engine.run(
+        max_samples=max_samples,
+        dataset_filter=dataset_filter,
+        model_filter=model_filter,
+    )
+    print(f"[Stage1] Completed on {engine.device}: {summary}")
+    return summary
+
+
+def _gpu_worker(
+    cfg: Dict[str, Any],
+    device: str,
+    model_names: List[str],
+    max_samples: Optional[int],
+    dataset_filter: Optional[List[str]],
+) -> Dict[str, Any]:
+    """Worker function executed in a child process for multi-GPU parallel run."""
+    return _run_stage1(
+        cfg,
+        max_samples=max_samples,
+        dataset_filter=dataset_filter,
+        model_filter=model_names,
+        device=device,
+    )
+
+
+def _run_stage1_parallel(
+    cfg: Dict[str, Any],
+    devices: List[str],
+    *,
+    max_samples: Optional[int],
+    dataset_filter: Optional[List[str]],
+    model_filter: Optional[List[str]],
+):
+    """Split models across *devices* and run each subset in a separate process."""
+    import multiprocessing as mp
+
+    models_cfg = cfg.get("models", [])
+    mdl_filter = set(model_filter or [])
+
+    # Collect model names that will actually run
+    model_names: List[str] = []
+    for m in models_cfg:
+        name = str(m.get("name"))
+        runner = str(m.get("runner", name))
+        if mdl_filter and name not in mdl_filter and runner not in mdl_filter:
+            continue
+        model_names.append(name)
+
+    if not model_names:
+        print("[Stage1] No models matched the filter.")
+        return
+
+    # Round-robin assignment of models → devices
+    n_devices = len(devices)
+    assignments: Dict[str, List[str]] = {d: [] for d in devices}
+    for i, name in enumerate(model_names):
+        assignments[devices[i % n_devices]].append(name)
+
+    # Remove empty assignments
+    assignments = {d: names for d, names in assignments.items() if names}
+
+    if len(assignments) == 1:
+        # Only one device has work → run directly, no subprocess overhead
+        dev, names = next(iter(assignments.items()))
+        _run_stage1(
+            cfg,
+            max_samples=max_samples,
+            dataset_filter=dataset_filter,
+            model_filter=names,
+            device=dev,
+        )
+        return
+
+    print(f"[Stage1] Multi-GPU: splitting {len(model_names)} model(s) across {len(assignments)} device(s)")
+    for dev, names in assignments.items():
+        print(f"  {dev}: {names}")
+
+    ctx = mp.get_context("spawn")
+    processes: List[mp.Process] = []
+    for dev, names in assignments.items():
+        p = ctx.Process(
+            target=_gpu_worker,
+            args=(cfg, dev, names, max_samples, dataset_filter),
+        )
+        p.start()
+        processes.append(p)
+
+    for p in processes:
+        p.join()
+
+    failed = [p for p in processes if p.exitcode != 0]
+    if failed:
+        raise RuntimeError(
+            f"[Stage1] {len(failed)}/{len(processes)} GPU worker(s) failed."
+        )
+
+
+def _run_stage1b(cfg: Dict[str, Any], exp_dir: Path):
+    from analysis.stats_merger import StatisticsMerger
+
+    merger = StatisticsMerger()
+    summary = merger.run(exp_dir)
+    print(f"[Stage1b] Completed: {summary}")
+    return summary
+
+
+def _run_stage2(cfg: Dict[str, Any], exp_dir: Path):
+    from viz import (
+        MetricPlotter,
+        ModelComparisonPlotter,
+        NoiseGalleryGenerator,
+        PredictionVisualizer,
+        PromptComparisonPlotter,
+        StatisticalTableGenerator,
+    )
+
+    merged_csv = exp_dir / "statistics_merged.csv"
+    if not merged_csv.exists():
+        raise RuntimeError(
+            f"Missing {merged_csv}. Run Stage 1b first."
+        )
+
+    figures_dir = exp_dir / "figures"
+    figures_dir.mkdir(parents=True, exist_ok=True)
+    artifact_root = exp_dir / "artifacts"
+
+    # Level descriptors from config (falls back to defaults in each viz class)
+    level_names = cfg.get("level_names")
+
+    outputs: Dict[str, str] = {}
+
+    # Metric curves & robustness
+    mp = MetricPlotter(merged_csv, figures_dir, level_names=level_names)
+    outputs["metric_curves_dice"] = str(mp.plot_metric_curves("Dice", "metric_curves_dice.pdf"))
+    outputs["metric_curves_iou"] = str(mp.plot_metric_curves("IoU", "metric_curves_iou.pdf"))
+    outputs["robustness_dice"] = str(mp.plot_robustness("Dice", "robustness_dice_drop.pdf"))
+
+    # Model comparison
+    mc = ModelComparisonPlotter(merged_csv, figures_dir, level_names=level_names)
+    outputs["model_comparison_dice"] = str(mc.plot("Dice", "model_comparison_dice.pdf"))
+
+    # Prompt visualization & comparison
+    pc = PromptComparisonPlotter(figures_dir, merged_csv)
+    outputs["prompt_visualization"] = str(pc.plot_schematic("prompt_visualization.pdf"))
+    outputs["prompt_comparison"] = str(pc.plot_comparison("Dice", "prompt_comparison_dice.pdf"))
+
+    # Noise gallery
+    ng = NoiseGalleryGenerator(artifact_root, figures_dir, level_names=level_names)
+    outputs["noise_gallery"] = str(ng.generate(filename="noise_gallery.pdf"))
+
+    # Prediction overlay
+    pv = PredictionVisualizer(artifact_root, figures_dir)
+    outputs["prediction_overlay"] = str(pv.generate(filename="prediction_overlay.pdf"))
+
+    # Statistical tables
+    st = StatisticalTableGenerator(merged_csv, figures_dir, level_names=level_names)
+    outputs["statistical_tables"] = str(st.generate("statistical_tables.pdf"))
+
+    print("[Stage2] Completed:")
+    for key, value in outputs.items():
+        print(f"  - {key}: {value}")
+    return outputs
+
+
+# ── CLI ──────────────────────────────────────────────────────────────────
 
 def parse_args():
-    ap = argparse.ArgumentParser(
-        description="AIO25 NoisySAM Benchmark Runner",
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="""
-Examples:
-  # Run full benchmark
-  python main.py --config configs/phase1.yaml
-  
-  # Quick debug run with caching
-  python main.py --config configs/phase1.yaml --debug --max_samples 5
-  
-  # Re-generate report from existing results
-  python main.py --config configs/phase1.yaml --only_report
-  
-  # Run specific noise types only
-  python main.py --config configs/phase1.yaml --max_noise gaussian,poisson
-  
-  # Clear cache and rerun
-  python main.py --config configs/phase1.yaml --clear_cache --use_cache
-"""
+    ap = argparse.ArgumentParser(description="Segmentation robustness pipeline")
+    ap.add_argument("--config", type=str, required=True, help="Path to YAML config file")
+    ap.add_argument(
+        "--stage",
+        type=str,
+        default="all",
+        choices=["run", "aggregate", "visualize", "all"],
+        help="Pipeline stage to execute",
     )
-    
-    # Required
-    ap.add_argument("--config", type=str, required=True, 
-                    help="Path to config file (e.g., configs/phase1.yaml)")
-    
-    # Phase override
-    ap.add_argument("--phase", type=int, choices=[1, 2], default=None,
-                    help="Override phase (1 or 2)")
-    
-    # Run modes
-    ap.add_argument("--dry_run", action="store_true",
-                    help="Print protocol cases without running inference")
-    ap.add_argument("--only_report", action="store_true",
-                    help="Skip inference, generate report from existing results.csv")
-    
-    # Sampling limits
-    ap.add_argument("--limit_n", type=int, default=None,
-                    help="Limit total number of samples (deprecated, use --max_samples)")
-    ap.add_argument("--max_samples", type=int, default=None,
-                    help="Maximum samples per protocol case")
-    
-    # Cache options
-    ap.add_argument("--use_cache", action="store_true",
-                    help="Enable prediction caching to skip repeated inferences")
-    ap.add_argument("--clear_cache", action="store_true",
-                    help="Clear existing cache before running")
-    
-    # Debug filters
-    ap.add_argument("--debug", action="store_true",
-                    help="Enable debug mode (implies --use_cache, single model/noise)")
-    ap.add_argument("--max_noise", type=str, default=None,
-                    help="Comma-separated list of noise types to run (e.g., gaussian,poisson)")
-    ap.add_argument("--max_level", type=str, default=None,
-                    help="Comma-separated list of levels to run (e.g., L1,L2)")
-    ap.add_argument("--max_models", type=int, default=None,
-                    help="Limit number of models to test")
-    
-    # Output options
-    ap.add_argument("--out_root", type=str, default=None,
-                    help="Override output root directory")
-    ap.add_argument("--exp_name", type=str, default=None,
-                    help="Override experiment name")
-    
-    # Verbosity
-    ap.add_argument("--verbose", "-v", action="store_true",
-                    help="Enable verbose output")
-    ap.add_argument("--quiet", "-q", action="store_true",
-                    help="Suppress progress output")
-    
+    ap.add_argument("--max_samples", type=int, default=None, help="Optional sample limit per dataset")
+    ap.add_argument(
+        "--datasets",
+        type=str,
+        default=None,
+        help="Comma-separated dataset names to run in stage 'run'",
+    )
+    ap.add_argument(
+        "--models",
+        type=str,
+        default=None,
+        help="Comma-separated model names/runners to run in stage 'run'",
+    )
+    ap.add_argument(
+        "--device",
+        type=str,
+        default=None,
+        help="Override device (e.g. 'cuda:0', 'cuda:1', 'cpu'). "
+             "Overrides the config file setting.",
+    )
+    ap.add_argument(
+        "--num_gpus",
+        type=int,
+        default=None,
+        help="Number of GPUs for parallel Stage 1. "
+             "Models are split round-robin across cuda:0 … cuda:N-1.",
+    )
     return ap.parse_args()
 
 
 def main():
-    args = parse_args()
-    cfg = load_yaml_config(Path(args.config))
+    from core.config_manager import ConfigManager
 
-    # Apply basic overrides
-    if args.phase is not None:
-        cfg["phase"] = int(args.phase)
-    if args.dry_run:
-        cfg["dry_run"] = True
-    if args.limit_n is not None:
-        cfg["limit_n"] = int(args.limit_n)
-    if args.out_root is not None:
-        cfg["exp"]["out_root"] = args.out_root
-    if args.exp_name is not None:
-        cfg["exp"]["name"] = args.exp_name
-    
-    # Apply extended CLI overrides
-    cfg = apply_cli_overrides(cfg, vars(args))
-    
-    # Handle debug mode
-    if args.debug:
-        cfg["cache"] = cfg.get("cache", {})
-        cfg["cache"]["enabled"] = True
-        cfg["debug"] = cfg.get("debug", {})
-        cfg["debug"]["enabled"] = True
-        if args.verbose:
-            print("[DEBUG] Debug mode enabled with caching")
-    
-    # Parse noise/level filters
-    if args.max_noise:
-        cfg["debug"] = cfg.get("debug", {})
-        cfg["debug"]["noise_types"] = [n.strip() for n in args.max_noise.split(",")]
-    
-    if args.max_level:
-        cfg["debug"] = cfg.get("debug", {})
-        cfg["debug"]["levels"] = [lv.strip() for lv in args.max_level.split(",")]
-    
-    if args.max_samples:
-        cfg["debug"] = cfg.get("debug", {})
-        cfg["debug"]["max_samples"] = args.max_samples
-    
-    if args.max_models:
-        cfg["debug"] = cfg.get("debug", {})
-        cfg["debug"]["max_models"] = args.max_models
-    
-    # Cache settings
-    if args.use_cache:
-        cfg["cache"] = cfg.get("cache", {})
-        cfg["cache"]["enabled"] = True
-    
-    if args.clear_cache:
-        cfg["cache"] = cfg.get("cache", {})
-        cfg["cache"]["clear_on_start"] = True
-    
-    # Report-only mode
-    if args.only_report:
-        cfg["only_report"] = True
-    
-    # Verbosity
-    if args.verbose:
-        cfg["verbose"] = True
-    if args.quiet:
-        cfg["verbose"] = False
-    
-    run_experiment(cfg)
+    args = parse_args()
+    cm = ConfigManager(args.config)
+
+    # CLI overrides for device selection
+    if args.device is not None:
+        cm.override_devices([args.device])
+    elif args.num_gpus is not None and args.num_gpus >= 2:
+        cm.override_devices([f"cuda:{i}" for i in range(args.num_gpus)])
+
+    cfg = cm.cfg
+    exp_dir = cm.exp_dir
+    devices = cm.devices
+    dataset_filter = [x.strip() for x in args.datasets.split(",")] if args.datasets else None
+    model_filter = [x.strip() for x in args.models.split(",")] if args.models else None
+
+    print(f"[Config] Device(s): {devices}")
+
+    if args.stage in {"run", "all"}:
+        if len(devices) >= 2:
+            _run_stage1_parallel(
+                cfg,
+                devices,
+                max_samples=args.max_samples,
+                dataset_filter=dataset_filter,
+                model_filter=model_filter,
+            )
+        else:
+            _run_stage1(
+                cfg,
+                max_samples=args.max_samples,
+                dataset_filter=dataset_filter,
+                model_filter=model_filter,
+                device=devices[0],
+            )
+
+    if args.stage in {"aggregate", "all"}:
+        _run_stage1b(cfg, exp_dir)
+
+    if args.stage in {"visualize", "all"}:
+        _run_stage2(cfg, exp_dir)
 
 
 if __name__ == "__main__":

@@ -3,9 +3,13 @@
 *.pt
 Montgomery/
 Shenzhen/
+BUSI/
+CAMUS/
+Thyroid Dataset/
 __pycache__/
 *.pyc
 logs/
 results/
 outputs/
 .vscode/
+

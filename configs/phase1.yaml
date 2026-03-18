@@ -1,129 +1,147 @@
-exp:
-  name: "phase1_xray_controlled_Shenzhen"
+﻿exp:
+  name: "phase1_tn3k_sam"
   out_root: "outputs"
 
-device: "cuda"   # auto fallback cpu nếu không có cuda
-seed: 42
-limit_n: 0       # 0 = all
-dry_run: false
-verbose: true
+# ─────────────────────────────────────────────────────────────────────────
+#  DEVICE / GPU CONFIGURATION
+#  Option 1 – single GPU:     device: "cuda:0"        (or "cuda", "cpu")
+#  Option 2 – explicit list:  devices: ["cuda:0", "cuda:1"]
+#  Option 3 – auto N GPUs:    num_gpus: 2
+#  CLI overrides: --device cuda:1   or   --num_gpus 2
+# ─────────────────────────────────────────────────────────────────────────
+device: "cpu"
+# devices: ["cuda:0", "cuda:1"]   # uncomment for multi-GPU parallel
+# num_gpus: 2                      # alternative: auto-pick N GPUs
 
-phase: 1
-
-# Cache configuration
-cache:
-  enabled: false          # Set true via --use_cache CLI flag
-  cache_dir: null         # Default: {out_root}/{exp_name}/.cache
-  clear_on_start: false   # Clear cache before running
-
-# Debug configuration (for quick testing)
-debug:
-  enabled: false
-  max_samples: null       # Limit samples per protocol case
-  noise_types: null       # Filter to specific noise types, e.g., ["gaussian", "poisson"]
-  levels: null            # Filter to specific levels, e.g., ["L1", "L2"]
-  max_models: null        # Limit number of models to test
+# STEP 1 options
+stage1:
+  save_artifacts: true
+  artifact_samples_per_case: 5
 
 datasets:
-  - name: "Shenzhen"
+  - name: "TN3K"
     adapter: "ImageMaskFolderAdapter"
-    root: "/content/Shenzhen/Shenzhen"
-    # root: "./data/Shenzhen"
-    image_dir: "img"
-    mask_dir: "mask"
+    root: "data/Thyroid Dataset/Thyroid Dataset/tn3k"
+    image_dir: "trainval-image"
+    mask_dir: "trainval-mask"
+    sources:
+      - name: "trainval"
+        image_dir: "trainval-image"
+        mask_dir: "trainval-mask"
+      - name: "test"
+        image_dir: "test-image"
+        mask_dir: "test-mask"
     image_exts: [".png", ".jpg", ".jpeg"]
     mask_exts: [".png", ".jpg", ".jpeg"]
     mask:
-      type: "binary_0_255"  # or "multiclass"
-      class_id: 1           # dùng khi multiclass
-  # - name: "jsrt_like"
-  #   adapter: "ImageMaskFolderAdapter"
-  #   root: "./data/jsrt_like"
-  #   image_dir: "images"
-  #   mask_dir: "masks"
-  #   image_exts: [".png"]
-  #   mask_exts: [".png"]
-  #   mask:
-  #     type: "binary_0_255"
+      type: "binary_0_255"
+      class_id: 1
 
 models:
   - name: "SAM"
     runner: "SAM1"
-    mode: ["prompt_bbox"]
-    weights:
-      - id: "sam_b"
-        # checkpoint: "/content/sam_b.pt"
-        checkpoint: "weights/sam_vit_b_01ec64.pth"
-        model_type: "vit_b"
-      # - id: "sam_l"
-        # checkpoint: "/content/sam_l.pt"
-      #  checkpoint: "weights/sam_vit_l_0b3195.pth"
-      #  model_type: "vit_l"
-
-inference:
-  image_rgb: "repeat_gray_3ch"
-  prompt:
-    default: "BOX_FROM_GT_BBOX"
+    prompt_modes: ["prompt_point", "prompt_bbox", "prompt_point_box", "autogen"]
 
 noises:
-  phase1_required: ["gaussian", "poisson", "salt_pepper", "motion_blur", "bias_field", "low_contrast"]
-  phase2_optional: ["speckle", "uniform", "jpeg", "quantization", "defocus_blur", "coarse_dropout", "gridmask"]
+  - gaussian
+  - poisson
+  - salt_pepper
+  - motion_blur
+  - bias_field
+  - low_contrast
 
 levels:
-  names: ["L0", "L1", "L2", "L3", "L4", "L5", "L6", "L7", "L8", "L9"]
-  # Intensity scalars for each level (used for normalization and plotting)
-  intensity_scalars:
-    L0: 0.0
-    L1: 0.25
-    L2: 0.50
-    L3: 0.75
-    L4: 1.0
-    L5: 1.0
-    L6: 1.0
-    L7: 1.0
-    L8: 1.0
-    L9: 1.0
+  - L0
+  - L1
+  - L2
+  - L3
+  - L4
+  - L5
+  - L6
+  - L7
+  - L8
+  - L9
 
+level_names:
+  L0: "clean"
+  L1: "very mild"
+  L2: "mild"
+  L3: "moderate"
+  L4: "strong"
+  L5: "severe"
+  L6: "extreme"
+  L7: "destructive"
+  L8: "near failure"
+  L9: "catastrophic"
 
-# Noise seed configuration for reproducibility studies
 noise_config:
-  n_noise_seeds: 1        # Number of different noise seeds per case (increase for seed stability analysis)
-  base_seed: 42           # Base seed for noise generation
+  base_seed: 42
+  n_noise_seeds: 1
 
 protocols:
-  enabled: ["P0", "P1"]
   coupled_presets:
-    # P1: coupled levels (p + severity đều tăng)
-    gaussian: {L1: {p: 0.3, sigma: 5}, L2: {p: 0.5, sigma: 9}, L3: {p: 0.7, sigma: 14}, L4: {p: 0.85, sigma: 20}, L5: {p: 1.0, sigma: 28}, L6: {p: 1.0, sigma: 38}, L7: {p: 1.0, sigma: 50}, L8: {p: 1.0, sigma: 65}, L9: {p: 1.0, sigma: 75}}
-    poisson: {L1: {p: 0.3, lam: 8}, L2: {p: 0.5, lam: 13}, L3: {p: 0.7, lam: 20}, L4: {p: 0.85, lam: 30}, L5: {p: 1.0, lam: 40}, L6: {p: 1.0, lam: 55}, L7: {p: 1.0, lam: 75}, L8: {p: 1.0, lam: 100}, L9: {p: 1.0, lam: 120}}
-    salt_pepper: {L1: {p: 0.3, amount: 0.005}, L2: {p: 0.5, amount: 0.008}, L3: {p: 0.7, amount: 0.012}, L4: {p: 0.85, amount: 0.020}, L5: {p: 1.0, amount: 0.032}, L6: {p: 1.0, amount: 0.050}, L7: {p: 1.0, amount: 0.080}, L8: {p: 1.0, amount: 0.120}, L9: {p: 1.0, amount: 0.2}}
-    motion_blur: {L1: {p: 0.3, k: 5, angle: 10}, L2: {p: 0.5, k: 7, angle: 12}, L3: {p: 0.7, k: 9, angle: 15}, L4: {p: 0.85, k: 13, angle: 20}, L5: {p: 1.0, k: 17, angle: 25}, L6: {p: 1.0, k: 23, angle: 30}, L7: {p: 1.0, k: 31, angle: 45}, L8: {p: 1.0, k: 39, angle: 60}, L9: {p: 1.0, k: 45, angle: 90}}
-    bias_field: {L1: {p: 0.3, strength: 0.20, smooth: 48}, L2: {p: 0.5, strength: 0.30, smooth: 56}, L3: {p: 0.7, strength: 0.45, smooth: 72}, L4: {p: 0.85, strength: 0.60, smooth: 96}, L5: {p: 1.0, strength: 0.80, smooth: 128}, L6: {p: 1.0, strength: 1.00, smooth: 160}, L7: {p: 1.0, strength: 1.25, smooth: 192}, L8: {p: 1.0, strength: 1.50, smooth: 224}, L9: {p: 1.0, strength: 2.0, smooth: 230}}
-    low_contrast: {L1: {p: 0.3, alpha: 0.85, beta: 0.0}, L2: {p: 0.5, alpha: 0.78, beta: 0.0}, L3: {p: 0.7, alpha: 0.70, beta: 0.0}, L4: {p: 0.85, alpha: 0.60, beta: 0.0}, L5: {p: 1.0, alpha: 0.50, beta: 0.0}, L6: {p: 1.0, alpha: 0.40, beta: 0.0}, L7: {p: 1.0, alpha: 0.30, beta: 0.0}, L8: {p: 1.0, alpha: 0.20, beta: 0.0}, L9: {p: 1.0, alpha: 0.1, beta: 0.0}}
-      
-  # P2: OFAT (One-Factor-At-a-Time) settings
-  ofat:
-    p_fixed: 0.8               # Fixed probability for P2a
-    severity_ref_level: "L3"   # Reference severity level for P2b
+    gaussian:
+      L1: {p: 1, sigma: 3}
+      L2: {p: 1, sigma: 6}
+      L3: {p: 1, sigma: 10}
+      L4: {p: 1, sigma: 14}
+      L5: {p: 1, sigma: 18}
+      L6: {p: 1, sigma: 24}
+      L7: {p: 1, sigma: 30}
+      L8: {p: 1, sigma: 38}
+      L9: {p: 1, sigma: 48}
 
-  # P3: Grid search (enabled for Phase 2)
-  grid:
-    enabled: false
-    p_values: [0.2, 0.5, 0.8]
-    severity_levels: ["L1", "L2", "L3"]
+    poisson:
+      L1: {p: 1, lam: 50}
+      L2: {p: 1, lam: 40}
+      L3: {p: 1, lam: 32}
+      L4: {p: 1, lam: 25}
+      L5: {p: 1, lam: 19}
+      L6: {p: 1, lam: 14}
+      L7: {p: 1, lam: 10}
+      L8: {p: 1, lam: 7}
+      L9: {p: 1, lam: 4}
 
-outputs:
-  save_pred_masks: true
-  num_preview_samples: 8
-  preview_levels: ["L0", "L1", "L2", "L3", "L4", "L5", "L6", "L7", "L8", "L9"]
-  num_failure_cases: 8
-  num_gallery_samples: 3    # Number of samples for noise gallery visualization
-  figures_dpi: 160
-  generate_global_plots: true  # Generate global sensitivity plots
-  noise_gallery_samples: 5  # Number of samples for noise gallery visualization
-  noise_gallery_levels: ["L0", "L1", "L2", "L3", "L4", "L5", "L6", "L7", "L9"]
-  save_noisy_images: true    # Save noisy images used for inference
-  # NEW: Noise visualization options
-  noise_viz_samples: 5       # Samples for noise visualization (overlay L0 only)
-  noise_viz_levels: ["L0", "L1", "L2", "L3", "L4", "L5", "L6", "L7", "L8", "L9"]
-  noise_effect_levels: ["L0", "L1", "L2", "L3", "L4", "L5", "L6", "L7", "L8", "L9"]  # Levels for noise effect comparison
+    salt_pepper:
+      L1: {p: 1, amount: 0.002}
+      L2: {p: 1, amount: 0.005}
+      L3: {p: 1, amount: 0.008}
+      L4: {p: 1, amount: 0.012}
+      L5: {p: 1, amount: 0.018}
+      L6: {p: 1, amount: 0.026}
+      L7: {p: 1, amount: 0.038}
+      L8: {p: 1, amount: 0.055}
+      L9: {p: 1, amount: 0.080}
+
+    motion_blur:
+      L1: {p: 1, k: 3, angle: 15}
+      L2: {p: 1, k: 5, angle: 15}
+      L3: {p: 1, k: 7, angle: 15}
+      L4: {p: 1, k: 9, angle: 15}
+      L5: {p: 1, k: 11, angle: 15}
+      L6: {p: 1, k: 13, angle: 15}
+      L7: {p: 1, k: 17, angle: 15}
+      L8: {p: 1, k: 21, angle: 15}
+      L9: {p: 1, k: 25, angle: 15}
+
+    bias_field:
+      L1: {p: 1, strength: 0.08, smooth: 96}
+      L2: {p: 1, strength: 0.15, smooth: 96}
+      L3: {p: 1, strength: 0.25, smooth: 96}
+      L4: {p: 1, strength: 0.35, smooth: 96}
+      L5: {p: 1, strength: 0.45, smooth: 96}
+      L6: {p: 1, strength: 0.60, smooth: 96}
+      L7: {p: 1, strength: 0.75, smooth: 96}
+      L8: {p: 1, strength: 0.90, smooth: 96}
+      L9: {p: 1, strength: 1.00, smooth: 96}
+
+    low_contrast:
+      L1: {p: 1, alpha: 0.95, beta: 0.0}
+      L2: {p: 1, alpha: 0.90, beta: 0.0}
+      L3: {p: 1, alpha: 0.82, beta: 0.0}
+      L4: {p: 1, alpha: 0.74, beta: 0.0}
+      L5: {p: 1, alpha: 0.66, beta: 0.0}
+      L6: {p: 1, alpha: 0.58, beta: 0.0}
+      L7: {p: 1, alpha: 0.50, beta: 0.0}
+      L8: {p: 1, alpha: 0.40, beta: 0.0}
+      L9: {p: 1, alpha: 0.30, beta: 0.0}

@@ -1,6 +1,16 @@
-"""Dataset adapters for SAM benchmark."""
-from datasets.base import BaseDatasetAdapter
-from datasets.image_mask_folder import ImageMaskFolderAdapter
-from datasets.registry import build_dataset
+"""Dataset adapters for the segmentation robustness benchmark."""
 
-__all__ = ["BaseDatasetAdapter", "ImageMaskFolderAdapter", "build_dataset"]
+from datasets.base_dataset import DatasetAdapter
+from datasets.adapters.image_mask_folder_adapter import ImageMaskFolderAdapter
+from datasets.adapters.busi_adapter import BUSIAdapter
+from datasets.adapters.camus_adapter import CAMUSAdapter
+from datasets.dataset_registry import build_dataset, register_adapter
+
+__all__ = [
+    "DatasetAdapter",
+    "ImageMaskFolderAdapter",
+    "BUSIAdapter",
+    "CAMUSAdapter",
+    "build_dataset",
+    "register_adapter",
+]

@@ -9,6 +9,7 @@ reportlab>=3.6.0
 scipy>=1.7.0
 opencv-python>=4.5.0
 torchvision>=0.11.0
+nibabel>=4.0.0
 
 # Optional: PyTorch (required for SAM models)
 # Install PyTorch according to your CUDA version:

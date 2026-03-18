@@ -1,305 +1,155 @@
-# Phase 2 Configuration
-# Extended benchmark with 4-5 datasets across multiple modalities
-# Includes optional Phase 2 noises and grid search
-
-exp:
-  name: "phase2_multi_modality"
+﻿exp:
+  name: "phase2_tn3k_tg3k_multimodel"
   out_root: "outputs"
 
-device: "cuda"
-seed: 42
-limit_n: 0       # 0 = all samples
-dry_run: false
-verbose: true
+# ─────────────────────────────────────────────────────────────────────────
+#  DEVICE / GPU CONFIGURATION
+#  Option 1 – single GPU:     device: "cuda:0"        (or "cuda", "cpu")
+#  Option 2 – explicit list:  devices: ["cuda:0", "cuda:1"]
+#  Option 3 – auto N GPUs:    num_gpus: 2
+#  CLI overrides: --device cuda:1   or   --num_gpus 2
+# ─────────────────────────────────────────────────────────────────────────
+device: "cpu"
+# devices: ["cuda:0", "cuda:1"]   # uncomment for multi-GPU parallel
+# num_gpus: 2                      # alternative: auto-pick N GPUs
 
-phase: 2
+stage1:
+  save_artifacts: true
+  artifact_samples_per_case: 3
 
-# Cache configuration
-cache:
-  enabled: false          # Set true via --use_cache CLI flag
-  cache_dir: null         # Default: {out_root}/{exp_name}/.cache
-  clear_on_start: false   # Clear cache before running
-
-# Debug configuration (for quick testing)
-debug:
-  enabled: false
-  max_samples: null       # Limit samples per protocol case
-  noise_types: null       # Filter to specific noise types
-  levels: null            # Filter to specific levels
-  max_models: null        # Limit number of models to test
-
-# ============================================================================
-# DATASETS - Phase 2: 4-5 datasets, potentially different modalities
-# ============================================================================
 datasets:
-  # Dataset 1: X-ray (Montgomery CXR)
-  - name: "montgomery"
+  - name: "TN3K"
     adapter: "ImageMaskFolderAdapter"
-    root: "./data/montgomery"
-    image_dir: "img"
-    mask_dir: "mask"
-    image_exts: [".png", ".jpg"]
-    mask_exts: [".png"]
+    root: "data/Thyroid Dataset/Thyroid Dataset/tn3k"
+    image_dir: "trainval-image"
+    mask_dir: "trainval-mask"
+    sources:
+      - name: "trainval"
+        image_dir: "trainval-image"
+        mask_dir: "trainval-mask"
+      - name: "test"
+        image_dir: "test-image"
+        mask_dir: "test-mask"
+    image_exts: [".png", ".jpg", ".jpeg"]
+    mask_exts: [".png", ".jpg", ".jpeg"]
     mask:
       type: "binary_0_255"
       class_id: 1
 
-  # Dataset 2: X-ray (JSRT)
-  - name: "jsrt"
+  - name: "TG3K"
     adapter: "ImageMaskFolderAdapter"
-    root: "./data/jsrt"
-    image_dir: "images"
-    mask_dir: "masks"
-    image_exts: [".png"]
-    mask_exts: [".png"]
+    root: "data/Thyroid Dataset/Thyroid Dataset/tg3k"
+    image_dir: "thyroid-image"
+    mask_dir: "thyroid-mask"
+    image_exts: [".png", ".jpg", ".jpeg"]
+    mask_exts: [".png", ".jpg", ".jpeg"]
     mask:
       type: "binary_0_255"
       class_id: 1
 
-  # Dataset 3: CT Scan
-  - name: "ct_liver"
-    adapter: "ImageMaskFolderAdapter"
-    root: "./data/ct_liver_2d"
-    image_dir: "images"
-    mask_dir: "masks"
-    image_exts: [".png", ".jpg"]
-    mask_exts: [".png"]
-    mask:
-      type: "binary_0_255"
-      class_id: 1
-
-  # Dataset 4: Ultrasound
-  - name: "ultrasound_breast"
-    adapter: "ImageMaskFolderAdapter"
-    root: "./data/ultrasound_breast"
-    image_dir: "images"
-    mask_dir: "masks"
-    image_exts: [".png", ".jpg"]
-    mask_exts: [".png"]
-    mask:
-      type: "binary_0_255"
-      class_id: 1
-
-  # Dataset 5: Dermoscopy
-  - name: "dermoscopy"
-    adapter: "ImageMaskFolderAdapter"
-    root: "./data/dermoscopy"
-    image_dir: "images"
-    mask_dir: "masks"
-    image_exts: [".png", ".jpg"]
-    mask_exts: [".png"]
-    mask:
-      type: "binary_0_255"
-      class_id: 1
-
-# ============================================================================
-# MODELS - Multi-model + Multi-weights
-# ============================================================================
 models:
-  # SAM (Original)
   - name: "SAM"
     runner: "SAM1"
-    mode: ["prompt_bbox", "automatic"]
-    weights:
-      - id: "sam_b"
-        checkpoint: "weights/sam_vit_b_01ec64.pth"
-        model_type: "vit_b"
-      - id: "sam_l"
-        checkpoint: "weights/sam_vit_l_0b3195.pth"
-        model_type: "vit_l"
-      - id: "sam_h"
-        checkpoint: "weights/sam_vit_h_4b8939.pth"
-        model_type: "vit_h"
+    prompt_modes: ["prompt_point", "prompt_bbox", "prompt_point_box"]
 
-  # SAM2
   - name: "SAM2"
     runner: "SAM2"
-    mode: ["prompt_bbox", "automatic"]
-    weights:
-      - id: "sam2_t"
-        checkpoint: "weights/sam2_t.pt"
-        model_type: "sam2_t"
-      - id: "sam2_s"
-        checkpoint: "weights/sam2_s.pt"
-        model_type: "sam2_s"
+    prompt_modes: ["prompt_point", "prompt_bbox", "prompt_point_box"]
 
-  # MedSAM
   - name: "MedSAM"
-    runner: "MedSAM"
-    mode: ["prompt_bbox"]
-    weights:
-      - id: "medsam"
-        checkpoint: "weights/medsam_vit_b.pth"
-        model_type: "vit_b"
+    runner: "MEDSAM1"
+    prompt_modes: ["prompt_bbox", "prompt_point_box"]
 
-# ============================================================================
-# INFERENCE SETTINGS
-# ============================================================================
-inference:
-  image_rgb: "repeat_gray_3ch"
-  prompt:
-    default: "BOX_FROM_GT_BBOX"
-    # Optional alternatives:
-    # - POINTS_FROM_GT
-    # - BOX_WITH_MARGIN
-
-# ============================================================================
-# NOISE CONFIGURATION
-# ============================================================================
 noises:
-  # Phase 1 required noises
-  phase1_required: 
-    - "gaussian"
-    - "poisson"
-    - "salt_pepper"
-    - "motion_blur"
-    - "bias_field"
-    - "low_contrast"
-  
-  # Phase 2 optional noises (enabled in this config)
-  phase2_optional:
-    - "speckle"
-    - "uniform"
-    - "jpeg"
-    - "quantization"
-    - "defocus_blur"
-    - "coarse_dropout"
-    - "gridmask"
+  - gaussian
+  - poisson
+  - salt_pepper
+  - motion_blur
+  - bias_field
+  - low_contrast
 
-# ============================================================================
-# LEVELS (L0-L4: Clean to Severe)
-# ============================================================================
-levels:
-  names: ["L0", "L1", "L2", "L3", "L4"]
-  # Intensity scalars for each level (used for normalization and plotting)
-  intensity_scalars:
-    L0: 0.0
-    L1: 0.25
-    L2: 0.50
-    L3: 0.75
-    L4: 1.0
+levels: [L0, L1, L2, L3, L4, L5, L6, L7, L8, L9]
 
-# Noise seed configuration for reproducibility studies
+level_names:
+  L0: "clean"
+  L1: "very mild"
+  L2: "mild"
+  L3: "moderate"
+  L4: "strong"
+  L5: "severe"
+  L6: "extreme"
+  L7: "destructive"
+  L8: "near failure"
+  L9: "catastrophic"
+
 noise_config:
-  n_noise_seeds: 1        # Number of different noise seeds per case
-  base_seed: 42           # Base seed for noise generation
+  base_seed: 42
+  n_noise_seeds: 3
 
-# ============================================================================
-# PROTOCOLS
-# ============================================================================
 protocols:
-  # Enable all protocols including grid search for Phase 2
-  enabled: ["P0", "P1", "P2", "P3"]
-  
-  # P1: Coupled presets - p and severity increase together
   coupled_presets:
-    # Phase 1 required
-    gaussian: 
-      L1: {p: 0.3, sigma: 5}
-      L2: {p: 0.6, sigma: 10}
-      L3: {p: 0.8, sigma: 18}
-      L4: {p: 1.0, sigma: 28}
-    
+    gaussian:
+      L1: {p: 1, sigma: 3}
+      L2: {p: 1, sigma: 6}
+      L3: {p: 1, sigma: 10}
+      L4: {p: 1, sigma: 14}
+      L5: {p: 1, sigma: 18}
+      L6: {p: 1, sigma: 24}
+      L7: {p: 1, sigma: 30}
+      L8: {p: 1, sigma: 38}
+      L9: {p: 1, sigma: 48}
+
     poisson:
-      L1: {p: 0.3, lam: 8}
-      L2: {p: 0.6, lam: 15}
-      L3: {p: 0.8, lam: 25}
-      L4: {p: 1.0, lam: 40}
-    
+      L1: {p: 1, lam: 50}
+      L2: {p: 1, lam: 40}
+      L3: {p: 1, lam: 32}
+      L4: {p: 1, lam: 25}
+      L5: {p: 1, lam: 19}
+      L6: {p: 1, lam: 14}
+      L7: {p: 1, lam: 10}
+      L8: {p: 1, lam: 7}
+      L9: {p: 1, lam: 4}
+
     salt_pepper:
-      L1: {p: 0.3, amount: 0.005}
-      L2: {p: 0.6, amount: 0.01}
-      L3: {p: 0.8, amount: 0.02}
-      L4: {p: 1.0, amount: 0.04}
-    
+      L1: {p: 1, amount: 0.002}
+      L2: {p: 1, amount: 0.005}
+      L3: {p: 1, amount: 0.008}
+      L4: {p: 1, amount: 0.012}
+      L5: {p: 1, amount: 0.018}
+      L6: {p: 1, amount: 0.026}
+      L7: {p: 1, amount: 0.038}
+      L8: {p: 1, amount: 0.055}
+      L9: {p: 1, amount: 0.080}
+
     motion_blur:
-      L1: {p: 0.3, k: 5, angle: 10}
-      L2: {p: 0.6, k: 9, angle: 15}
-      L3: {p: 0.8, k: 13, angle: 20}
-      L4: {p: 1.0, k: 17, angle: 25}
-    
+      L1: {p: 1, k: 3, angle: 15}
+      L2: {p: 1, k: 5, angle: 15}
+      L3: {p: 1, k: 7, angle: 15}
+      L4: {p: 1, k: 9, angle: 15}
+      L5: {p: 1, k: 11, angle: 15}
+      L6: {p: 1, k: 13, angle: 15}
+      L7: {p: 1, k: 17, angle: 15}
+      L8: {p: 1, k: 21, angle: 15}
+      L9: {p: 1, k: 25, angle: 15}
+
     bias_field:
-      L1: {p: 0.3, strength: 0.2, smooth: 48}
-      L2: {p: 0.6, strength: 0.35, smooth: 64}
-      L3: {p: 0.8, strength: 0.55, smooth: 96}
-      L4: {p: 1.0, strength: 0.8, smooth: 128}
-    
+      L1: {p: 1, strength: 0.08, smooth: 96}
+      L2: {p: 1, strength: 0.15, smooth: 96}
+      L3: {p: 1, strength: 0.25, smooth: 96}
+      L4: {p: 1, strength: 0.35, smooth: 96}
+      L5: {p: 1, strength: 0.45, smooth: 96}
+      L6: {p: 1, strength: 0.60, smooth: 96}
+      L7: {p: 1, strength: 0.75, smooth: 96}
+      L8: {p: 1, strength: 0.90, smooth: 96}
+      L9: {p: 1, strength: 1.00, smooth: 96}
+
     low_contrast:
-      L1: {p: 0.3, alpha: 0.85, beta: 0.0}
-      L2: {p: 0.6, alpha: 0.75, beta: 0.0}
-      L3: {p: 0.8, alpha: 0.65, beta: 0.0}
-      L4: {p: 1.0, alpha: 0.50, beta: 0.0}
-    
-    # Phase 2 optional
-    speckle:
-      L1: {p: 0.3, sigma: 0.04}
-      L2: {p: 0.6, sigma: 0.08}
-      L3: {p: 0.8, sigma: 0.12}
-      L4: {p: 1.0, sigma: 0.18}
-    
-    uniform:
-      L1: {p: 0.3, a: -5, b: 5}
-      L2: {p: 0.6, a: -10, b: 10}
-      L3: {p: 0.8, a: -18, b: 18}
-      L4: {p: 1.0, a: -25, b: 25}
-    
-    jpeg:
-      L1: {p: 0.3, quality: 70}
-      L2: {p: 0.6, quality: 50}
-      L3: {p: 0.8, quality: 30}
-      L4: {p: 1.0, quality: 15}
-    
-    quantization:
-      L1: {p: 0.3, step: 4}
-      L2: {p: 0.6, step: 8}
-      L3: {p: 0.8, step: 16}
-      L4: {p: 1.0, step: 32}
-    
-    defocus_blur:
-      L1: {p: 0.3, k: 3}
-      L2: {p: 0.6, k: 5}
-      L3: {p: 0.8, k: 9}
-      L4: {p: 1.0, k: 13}
-    
-    coarse_dropout:
-      L1: {p: 0.3, holes: 4, size: 16}
-      L2: {p: 0.6, holes: 8, size: 24}
-      L3: {p: 0.8, holes: 12, size: 32}
-      L4: {p: 1.0, holes: 16, size: 48}
-    
-    gridmask:
-      L1: {p: 0.3, d: 64, r: 16}
-      L2: {p: 0.6, d: 48, r: 16}
-      L3: {p: 0.8, d: 32, r: 16}
-      L4: {p: 1.0, d: 24, r: 12}
-
-  # P2: OFAT (One-Factor-At-a-Time) settings
-  ofat:
-    p_fixed: 0.8               # Fixed probability for P2a
-    severity_ref_level: "L3"   # Reference severity level for P2b
-
-  # P3: Grid search (enabled for Phase 2)
-  grid:
-    enabled: true
-    p_values: [0.2, 0.5, 0.8]
-    severity_levels: ["L1", "L2", "L3"]
-
-  # Mixed noise sets (Phase 2 optional)
-  mix_sets:
-    enabled: true
-    sets:
-      acquisition_combo: ["gaussian", "motion_blur"]
-      medical_artifacts: ["bias_field", "low_contrast", "poisson"]
-      compression_artifacts: ["jpeg", "quantization"]
-
-# ============================================================================
-# OUTPUT SETTINGS
-# ============================================================================
-outputs:
-  save_pred_masks: true
-  num_preview_samples: 12
-  preview_levels: ["L0", "L2", "L4"]
-  num_failure_cases: 10
-  num_gallery_samples: 3    # Number of samples for noise gallery visualization
-  figures_dpi: 200
-  generate_global_plots: true  # Generate global sensitivity plots
+      L1: {p: 1, alpha: 0.95, beta: 0.0}
+      L2: {p: 1, alpha: 0.90, beta: 0.0}
+      L3: {p: 1, alpha: 0.82, beta: 0.0}
+      L4: {p: 1, alpha: 0.74, beta: 0.0}
+      L5: {p: 1, alpha: 0.66, beta: 0.0}
+      L6: {p: 1, alpha: 0.58, beta: 0.0}
+      L7: {p: 1, alpha: 0.50, beta: 0.0}
+      L8: {p: 1, alpha: 0.40, beta: 0.0}
+      L9: {p: 1, alpha: 0.30, beta: 0.0}

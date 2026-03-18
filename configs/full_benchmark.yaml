@@ -1,0 +1,262 @@
+# =========================================================================
+#  Full Benchmark Config
+#  All datasets × All models (with available weights)
+#  Just run:  python main.py --config configs/full_benchmark.yaml --stage 1
+# =========================================================================
+
+exp:
+  name: "full_benchmark"
+  out_root: "outputs"
+
+# ─────────────────────────────────────────────────────────────────────────
+#  DEVICE / GPU CONFIGURATION
+#  Option 1 – single GPU:     device: "cuda:0"        (or "cuda", "cpu")
+#  Option 2 – explicit list:  devices: ["cuda:0", "cuda:1"]
+#  Option 3 – auto N GPUs:    num_gpus: 2
+#  CLI overrides: --device cuda:1   or   --num_gpus 2
+# ─────────────────────────────────────────────────────────────────────────
+device: "cuda"
+# devices: ["cuda:0", "cuda:1"]   # uncomment for multi-GPU parallel
+# num_gpus: 2                      # alternative: auto-pick N GPUs
+
+stage1:
+  save_artifacts: true
+  artifact_samples_per_case: 3
+
+# ─────────────────────────────────────────────────────────────────────────
+#  DATASETS
+# ─────────────────────────────────────────────────────────────────────────
+datasets:
+
+  # 1) Montgomery County X-ray  (138 images)
+  - name: "Montgomery"
+    adapter: "ImageMaskFolderAdapter"
+    root: "data/Montgomery"
+    image_dir: "img"
+    mask_dir: "mask"
+    image_exts: [".png"]
+    mask_exts: [".png"]
+    mask:
+      type: "binary_0_255"
+      class_id: 1
+
+  # 2) BUSI – Breast Ultrasound  (~437 benign+malignant pairs)
+  - name: "BUSI"
+    adapter: "BUSIAdapter"
+    root: "data/BUSI/Dataset_BUSI_with_GT"
+    categories: ["benign", "malignant"]
+    image_exts: [".png"]
+
+  # 3) CAMUS – Cardiac Ultrasound  (500 patients × 2 views × 2 phases = ~2000)
+  - name: "CAMUS"
+    adapter: "CAMUSAdapter"
+    root: "data/CAMUS/CAMUS_public/database_nifti"
+    views: ["2CH", "4CH"]
+    phases: ["ED", "ES"]
+    class_id: 1           # LV endocardium (change to 0 for all foreground)
+
+  # 4) TN3K – Thyroid Nodule  (trainval+test merged = 3493 images)
+  - name: "TN3K"
+    adapter: "ImageMaskFolderAdapter"
+    root: "data/Thyroid Dataset/Thyroid Dataset/tn3k"
+    image_dir: "trainval-image"
+    mask_dir: "trainval-mask"
+    sources:
+      - name: "trainval"
+        image_dir: "trainval-image"
+        mask_dir: "trainval-mask"
+      - name: "test"
+        image_dir: "test-image"
+        mask_dir: "test-mask"
+    image_exts: [".png", ".jpg", ".jpeg"]
+    mask_exts: [".png", ".jpg", ".jpeg"]
+    mask:
+      type: "binary_0_255"
+      class_id: 1
+
+  # 5) TG3K – Thyroid Gland  (3585 images)
+  - name: "TG3K"
+    adapter: "ImageMaskFolderAdapter"
+    root: "data/Thyroid Dataset/Thyroid Dataset/tg3k"
+    image_dir: "thyroid-image"
+    mask_dir: "thyroid-mask"
+    image_exts: [".png", ".jpg", ".jpeg"]
+    mask_exts: [".png", ".jpg", ".jpeg"]
+    mask:
+      type: "binary_0_255"
+      class_id: 1
+
+  # 6) DDTI – Digital Database of Thyroid Imaging  (637 images)
+  - name: "DDTI"
+    adapter: "ImageMaskFolderAdapter"
+    root: "data/Thyroid Dataset/Thyroid Dataset/DDTI dataset/DDTI/1_or_data"
+    image_dir: "image"
+    mask_dir: "mask"
+    image_exts: [".png", ".PNG"]
+    mask_exts: [".png", ".PNG"]
+    mask:
+      type: "binary_0_255"
+      class_id: 1
+
+# ─────────────────────────────────────────────────────────────────────────
+#  MODELS  (only models with available weights)
+# ─────────────────────────────────────────────────────────────────────────
+models:
+
+  - name: "SAM"
+    runner: "SAM1"
+    checkpoint: "weights/sam_b.pt"
+    prompt_modes: ["prompt_point", "prompt_bbox", "prompt_point_box"]
+
+  - name: "SAM2"
+    runner: "SAM2"
+    checkpoint: "weights/sam2_b.pt"
+    prompt_modes: ["prompt_point", "prompt_bbox", "prompt_point_box"]
+
+  - name: "SAM3"
+    runner: "SAM3"
+    checkpoint: "weights/sam3.pt"
+    prompt_modes: ["prompt_point", "prompt_bbox", "prompt_point_box"]
+
+  - name: "MedSAM"
+    runner: "MEDSAM1"
+    checkpoint: "weights/medsam_vit_b.pth"
+    prompt_modes: ["prompt_point", "prompt_bbox", "prompt_point_box"]
+
+  # MedSAM2 – MedSAM built on SAM2 backbone
+  - name: "MedSAM2"
+    runner: "MEDSAM2"
+    checkpoint: "weights/MedSAM2/MedSAM2_latest.pt"
+    config: "sam2.1_hiera_t512.yaml"
+    prompt_modes: ["prompt_point", "prompt_bbox", "prompt_point_box"]
+
+  # MedSAM3 – LoRA fine-tuned on SAM3 base
+  # Note: Uses SAM3 base weights (weights/sam3.pt) + LoRA adapter
+  - name: "MedSAM3"
+    runner: "MEDSAM3"
+    checkpoint: "weights/sam3.pt"
+    lora_weights: "weights/MedSAM3/best_lora_weights.pt"
+    prompt_modes: ["prompt_point", "prompt_bbox", "prompt_point_box"]
+
+  # SAM-Med2D – SAM fine-tuned on large-scale medical 2D dataset
+  - name: "SAM-Med2D"
+    runner: "SAM-MED2D"
+    checkpoint: "weights/sam_med2d.pt"
+    prompt_modes: ["prompt_point", "prompt_bbox", "prompt_point_box"]
+
+  # - name: "UltraSAM"
+  #   runner: "ULTRASAM"
+  #   checkpoint: "weights/UltraSam.pth"
+  #   prompt_modes: ["prompt_point", "prompt_bbox", "prompt_point_box"]
+
+# ─────────────────────────────────────────────────────────────────────────
+#  NOISE TYPES & LEVELS
+# ─────────────────────────────────────────────────────────────────────────
+noises:
+  - gaussian
+  - poisson
+  - salt_pepper
+  - motion_blur
+  - bias_field
+  - low_contrast
+  - speckle
+
+levels: [L0, L1, L2, L3, L4, L5, L6, L7, L8, L9]
+
+level_names:
+  L0: "clean"
+  L1: "very mild"
+  L2: "mild"
+  L3: "moderate"
+  L4: "strong"
+  L5: "severe"
+  L6: "extreme"
+  L7: "destructive"
+  L8: "near failure"
+  L9: "catastrophic"
+
+noise_config:
+  base_seed: 42
+  n_noise_seeds: 1
+
+# ─────────────────────────────────────────────────────────────────────────
+#  NOISE PRESETS  (coupled_presets: L1–L9 for each noise type)
+# ─────────────────────────────────────────────────────────────────────────
+protocols:
+  coupled_presets:
+    gaussian:
+      L1: {p: 1, sigma: 3}
+      L2: {p: 1, sigma: 6}
+      L3: {p: 1, sigma: 10}
+      L4: {p: 1, sigma: 15}
+      L5: {p: 1, sigma: 20}
+      L6: {p: 1, sigma: 30}
+      L7: {p: 1, sigma: 40}
+      L8: {p: 1, sigma: 55}
+      L9: {p: 1, sigma: 80}
+
+    poisson:
+      L1: {p: 1, lam: 80}
+      L2: {p: 1, lam: 60}
+      L3: {p: 1, lam: 50}
+      L4: {p: 1, lam: 30}
+      L5: {p: 1, lam: 20}
+      L6: {p: 1, lam: 14}
+      L7: {p: 1, lam: 10}
+      L8: {p: 1, lam: 7}
+      L9: {p: 1, lam: 4}
+
+    salt_pepper:
+      L1: {p: 1, amount: 0.002}
+      L2: {p: 1, amount: 0.005}
+      L3: {p: 1, amount: 0.008}
+      L4: {p: 1, amount: 0.015}
+      L5: {p: 1, amount: 0.02}
+      L6: {p: 1, amount: 0.03}
+      L7: {p: 1, amount: 0.05}
+      L8: {p: 1, amount: 0.075}
+      L9: {p: 1, amount: 0.1}
+
+    motion_blur:
+      L1: {p: 1, k: 3, angle: 15}
+      L2: {p: 1, k: 5, angle: 15}
+      L3: {p: 1, k: 7, angle: 15}
+      L4: {p: 1, k: 9, angle: 15}
+      L5: {p: 1, k: 11, angle: 15}
+      L6: {p: 1, k: 13, angle: 15}
+      L7: {p: 1, k: 17, angle: 15}
+      L8: {p: 1, k: 25, angle: 15}
+      L9: {p: 1, k: 35, angle: 15}
+
+    bias_field:
+      L1: {p: 1, strength: 0.08, smooth: 96}
+      L2: {p: 1, strength: 0.15, smooth: 96}
+      L3: {p: 1, strength: 0.25, smooth: 96}
+      L4: {p: 1, strength: 0.35, smooth: 96}
+      L5: {p: 1, strength: 0.45, smooth: 96}
+      L6: {p: 1, strength: 0.60, smooth: 96}
+      L7: {p: 1, strength: 0.75, smooth: 96}
+      L8: {p: 1, strength: 1.0, smooth: 96}
+      L9: {p: 1, strength: 1.25, smooth: 96}
+
+    low_contrast:
+      L1: {p: 1, alpha: 0.95, beta: 0.0}
+      L2: {p: 1, alpha: 0.90, beta: 0.0}
+      L3: {p: 1, alpha: 0.82, beta: 0.0}
+      L4: {p: 1, alpha: 0.74, beta: 0.0}
+      L5: {p: 1, alpha: 0.66, beta: 0.0}
+      L6: {p: 1, alpha: 0.58, beta: 0.0}
+      L7: {p: 1, alpha: 0.50, beta: 0.0}
+      L8: {p: 1, alpha: 0.40, beta: 0.0}
+      L9: {p: 1, alpha: 0.30, beta: 0.0}
+
+    speckle:
+      L1: {sigma: 0.02}
+      L2: {sigma: 0.04}
+      L3: {sigma: 0.08}
+      L4: {sigma: 0.10}
+      L5: {sigma: 0.14}
+      L6: {sigma: 0.18}
+      L7: {sigma: 0.24}
+      L8: {sigma: 0.30}
+      L9: {sigma: 0.34}
