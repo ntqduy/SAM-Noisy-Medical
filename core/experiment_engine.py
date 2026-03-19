@@ -301,7 +301,7 @@ class ExperimentEngine:
                             # Montgomery lungs are disconnected (left/right), so use two positive points.
                             **(
                                 {"n_fg_points": 2, "single_point": False}
-                                if str(ds_name).strip().lower() == "montgomery" and pm == "prompt_point"
+                                if str(ds_name).strip().lower() == "montgomery" and prompt_mode == "prompt_point"
                                 else {}
                             ),
                         },
