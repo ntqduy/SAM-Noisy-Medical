@@ -26,6 +26,7 @@ def format_level_label(level: str, level_names: dict | None = None) -> str:
 from viz.plot_metrics import MetricPlotter
 from viz.model_comparison import ModelComparisonPlotter
 from viz.noise_gallery import NoiseGalleryGenerator
+from viz.paper_visualization_suite import PaperVisualizationSuite
 from viz.prediction_overlay import PredictionVisualizer
 from viz.prompt_visualization import PromptComparisonPlotter
 from viz.statistical_tables import StatisticalTableGenerator
@@ -33,6 +34,7 @@ from viz.statistical_tables import StatisticalTableGenerator
 # backwards-compat free functions
 from viz.model_comparison import generate_model_comparison
 from viz.noise_gallery import generate_noise_gallery
+from viz.paper_visualization_suite import generate_paper_visualizations
 from viz.plot_metrics import generate_metric_curves, generate_robustness_plot
 from viz.prediction_overlay import generate_prediction_overlays
 from viz.prompt_visualization import generate_prompt_comparison, generate_prompt_visualization
@@ -46,6 +48,7 @@ __all__ = [
     "MetricPlotter",
     "ModelComparisonPlotter",
     "NoiseGalleryGenerator",
+    "PaperVisualizationSuite",
     "PredictionVisualizer",
     "PromptComparisonPlotter",
     "StatisticalTableGenerator",
@@ -57,5 +60,6 @@ __all__ = [
     "generate_prompt_comparison",
     "generate_prediction_overlays",
     "generate_model_comparison",
+    "generate_paper_visualizations",
     "generate_statistical_tables",
 ]

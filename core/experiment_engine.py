@@ -21,6 +21,8 @@ Loop structure::
 from __future__ import annotations
 
 import csv
+import hashlib
+import os
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -166,6 +168,17 @@ class ExperimentEngine:
         s1 = cfg.get("stage1", {})
         self.save_artifacts: bool = bool(s1.get("save_artifacts", True))
         self.artifact_samples_per_case: int = int(s1.get("artifact_samples_per_case", 5))
+        self.cache_noisy_images: bool = bool(s1.get("cache_noisy_images", True))
+        cache_dir_cfg = s1.get("noise_cache_dir")
+        if cache_dir_cfg:
+            cache_dir = Path(str(cache_dir_cfg))
+            if not cache_dir.is_absolute():
+                cache_dir = self.exp_dir / cache_dir
+        else:
+            cache_dir = self.exp_dir / "noise_cache"
+        self.noise_cache_dir: Path = cache_dir
+        if self.cache_noisy_images:
+            self.noise_cache_dir.mkdir(parents=True, exist_ok=True)
 
     # ── public API ───────────────────────────────────────────────────────
 
@@ -284,13 +297,11 @@ class ExperimentEngine:
                         sample.get("mask", sample.get("gt_mask"))
                     )
 
-                    noisy_image = self.noise_manager.apply_noise(
-                        image,
-                        noise_type=case.noise_type,
-                        level=case.noise_level,
-                        seed=case.noise_seed,
-                        dataset_name=ds_name,
+                    noisy_image = self._get_noisy_image(
+                        image=image,
+                        ds_name=ds_name,
                         image_id=image_id,
+                        case=case,
                     )
 
                     resolved_prompt = resolve_prompt(
@@ -400,6 +411,87 @@ class ExperimentEngine:
             raw = ["prompt_bbox"]
         return list(dict.fromkeys(normalize_prompt_mode(x) for x in raw))
 
+    # ── noisy-image cache ────────────────────────────────────────────────
+
+    def _noise_cache_path(
+        self,
+        *,
+        ds_name: str,
+        case: NoiseCase,
+        image_id: str,
+        image: np.ndarray,
+    ) -> Path:
+        sid = _sanitize_id(image_id)
+        h, w = image.shape[:2]
+        c = int(image.shape[2]) if image.ndim == 3 else 1
+        dims = f"{h}x{w}x{c}"
+        params = self.noise_manager.get_params(case.noise_type, case.noise_level) or {}
+        sig_key = (
+            f"{self.noise_manager.base_seed}|{case.noise_seed}|"
+            f"{case.noise_type}|{case.noise_level}|{sorted(params.items())}"
+        )
+        cfg_sig = hashlib.sha1(sig_key.encode("utf-8")).hexdigest()[:10]
+        return (
+            self.noise_cache_dir
+            / _slugify(ds_name)
+            / _slugify(case.noise_type)
+            / case.noise_level
+            / f"seed{case.noise_seed}"
+            / f"{sid}_{dims}_{cfg_sig}.npy"
+        )
+
+    def _get_noisy_image(
+        self,
+        *,
+        image: np.ndarray,
+        ds_name: str,
+        image_id: str,
+        case: NoiseCase,
+    ) -> np.ndarray:
+        cache_path = self._noise_cache_path(
+            ds_name=ds_name,
+            case=case,
+            image_id=image_id,
+            image=image,
+        )
+
+        if self.cache_noisy_images and cache_path.exists():
+            try:
+                cached = np.load(cache_path, allow_pickle=False)
+                if cached.shape == image.shape and cached.dtype == np.uint8:
+                    return cached
+            except Exception:
+                pass
+
+        noisy = self.noise_manager.apply_noise(
+            image,
+            noise_type=case.noise_type,
+            level=case.noise_level,
+            seed=case.noise_seed,
+            dataset_name=ds_name,
+            image_id=image_id,
+        )
+        noisy = np.asarray(noisy, dtype=np.uint8)
+
+        if self.cache_noisy_images:
+            cache_path.parent.mkdir(parents=True, exist_ok=True)
+            tmp_path = cache_path.with_suffix(cache_path.suffix + f".tmp.{os.getpid()}")
+            try:
+                with open(tmp_path, "wb") as f:
+                    np.save(f, noisy, allow_pickle=False)
+                if not cache_path.exists():
+                    os.replace(tmp_path, cache_path)
+                else:
+                    tmp_path.unlink(missing_ok=True)
+            except Exception:
+                try:
+                    if tmp_path.exists():
+                        tmp_path.unlink()
+                except Exception:
+                    pass
+
+        return noisy
+
     # ── artifact saving ──────────────────────────────────────────────────
 
     def _maybe_save_artifacts(
@@ -418,15 +510,54 @@ class ExperimentEngine:
     ) -> None:
         if not self.save_artifacts:
             return
-        case_key = (
+
+        sid = _sanitize_id(image_id)
+
+        # Save shared original/noisy/gt once per (dataset, noise, level, seed, image_id),
+        # then reuse across all model/prompt runs.
+        shared_case_key = (
+            f"{ds_name}|{case.noise_type}|{case.noise_level}|{case.noise_seed}"
+        )
+        shared_count_key = f"shared|{shared_case_key}"
+        can_save_shared = (
+            self.artifact_samples_per_case <= 0
+            or artifact_counts.get(shared_count_key, 0) < self.artifact_samples_per_case
+        )
+        if can_save_shared:
+            shared_dir = (
+                self.exp_dir
+                / "artifacts"
+                / "_shared"
+                / _slugify(ds_name)
+                / _slugify(case.noise_type)
+                / case.noise_level
+                / f"seed{case.noise_seed}"
+            )
+            saved_shared = False
+            saved_shared |= self._save_image_if_missing(
+                shared_dir / f"{sid}_original.png", image.astype(np.uint8)
+            )
+            saved_shared |= self._save_image_if_missing(
+                shared_dir / f"{sid}_noisy.png", noisy_image.astype(np.uint8)
+            )
+            saved_shared |= self._save_image_if_missing(
+                shared_dir / f"{sid}_gt.png", (_to_uint8_mask(gt_mask) * 255)
+            )
+            if saved_shared:
+                artifact_counts[shared_count_key] = artifact_counts.get(shared_count_key, 0) + 1
+
+        # Keep prediction masks per model/prompt for comparison/overlay.
+        pred_case_key = (
             f"{ds_name}|{mdl_name}|{prompt_mode}|"
             f"{case.noise_type}|{case.noise_level}|{case.noise_seed}"
         )
-        if self.artifact_samples_per_case > 0 and artifact_counts.get(case_key, 0) >= self.artifact_samples_per_case:
+        pred_count_key = f"pred|{pred_case_key}"
+        if (
+            self.artifact_samples_per_case > 0
+            and artifact_counts.get(pred_count_key, 0) >= self.artifact_samples_per_case
+        ):
             return
-        artifact_counts[case_key] = artifact_counts.get(case_key, 0) + 1
 
-        sid = _sanitize_id(image_id)
         out_dir = (
             self.exp_dir / "artifacts"
             / _slugify(ds_name) / _slugify(mdl_name)
@@ -434,11 +565,19 @@ class ExperimentEngine:
             / _slugify(case.noise_type) / case.noise_level
             / f"seed{case.noise_seed}"
         )
-        out_dir.mkdir(parents=True, exist_ok=True)
-        Image.fromarray(image.astype(np.uint8)).save(out_dir / f"{sid}_original.png")
-        Image.fromarray(noisy_image.astype(np.uint8)).save(out_dir / f"{sid}_noisy.png")
-        Image.fromarray((_to_uint8_mask(gt_mask) * 255)).save(out_dir / f"{sid}_gt.png")
-        Image.fromarray((_to_uint8_mask(pred_mask) * 255)).save(out_dir / f"{sid}_pred.png")
+        saved_pred = self._save_image_if_missing(
+            out_dir / f"{sid}_pred.png", (_to_uint8_mask(pred_mask) * 255)
+        )
+        if saved_pred:
+            artifact_counts[pred_count_key] = artifact_counts.get(pred_count_key, 0) + 1
+
+    @staticmethod
+    def _save_image_if_missing(path: Path, arr: np.ndarray) -> bool:
+        if path.exists():
+            return False
+        path.parent.mkdir(parents=True, exist_ok=True)
+        Image.fromarray(np.asarray(arr, dtype=np.uint8)).save(path)
+        return True
 
     # ── manifest ─────────────────────────────────────────────────────────
 

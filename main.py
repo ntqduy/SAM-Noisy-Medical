@@ -132,14 +132,7 @@ def _run_stage1b(cfg: Dict[str, Any], exp_dir: Path):
 
 
 def _run_stage2(cfg: Dict[str, Any], exp_dir: Path):
-    from viz import (
-        MetricPlotter,
-        ModelComparisonPlotter,
-        NoiseGalleryGenerator,
-        PredictionVisualizer,
-        PromptComparisonPlotter,
-        StatisticalTableGenerator,
-    )
+    from viz import PaperVisualizationSuite
 
     merged_csv = exp_dir / "statistics_merged.csv"
     if not merged_csv.exists():
@@ -147,41 +140,14 @@ def _run_stage2(cfg: Dict[str, Any], exp_dir: Path):
             f"Missing {merged_csv}. Run Stage 1b first."
         )
 
-    figures_dir = exp_dir / "figures"
-    figures_dir.mkdir(parents=True, exist_ok=True)
     artifact_root = exp_dir / "artifacts"
-
-    # Level descriptors from config (falls back to defaults in each viz class)
-    level_names = cfg.get("level_names")
-
-    outputs: Dict[str, str] = {}
-
-    # Metric curves & robustness
-    mp = MetricPlotter(merged_csv, figures_dir, level_names=level_names)
-    outputs["metric_curves_dice"] = str(mp.plot_metric_curves("Dice", "metric_curves_dice.pdf"))
-    outputs["metric_curves_iou"] = str(mp.plot_metric_curves("IoU", "metric_curves_iou.pdf"))
-    outputs["robustness_dice"] = str(mp.plot_robustness("Dice", "robustness_dice_drop.pdf"))
-
-    # Model comparison
-    mc = ModelComparisonPlotter(merged_csv, figures_dir, level_names=level_names)
-    outputs["model_comparison_dice"] = str(mc.plot("Dice", "model_comparison_dice.pdf"))
-
-    # Prompt visualization & comparison
-    pc = PromptComparisonPlotter(figures_dir, merged_csv)
-    outputs["prompt_visualization"] = str(pc.plot_schematic("prompt_visualization.pdf"))
-    outputs["prompt_comparison"] = str(pc.plot_comparison("Dice", "prompt_comparison_dice.pdf"))
-
-    # Noise gallery
-    ng = NoiseGalleryGenerator(artifact_root, figures_dir, level_names=level_names)
-    outputs["noise_gallery"] = str(ng.generate(filename="noise_gallery.pdf"))
-
-    # Prediction overlay
-    pv = PredictionVisualizer(artifact_root, figures_dir)
-    outputs["prediction_overlay"] = str(pv.generate(filename="prediction_overlay.pdf"))
-
-    # Statistical tables
-    st = StatisticalTableGenerator(merged_csv, figures_dir, level_names=level_names)
-    outputs["statistical_tables"] = str(st.generate("statistical_tables.pdf"))
+    pvs = PaperVisualizationSuite(
+        merged_csv,
+        output_root=Path("outputs") / "visualizations",
+        artifact_root=artifact_root if artifact_root.exists() else None,
+    )
+    suite_outputs = pvs.generate_all()
+    outputs: Dict[str, str] = {k: str(v) for k, v in suite_outputs.items()}
 
     print("[Stage2] Completed:")
     for key, value in outputs.items():

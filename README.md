@@ -106,6 +106,13 @@ Important for GPU:
 python main.py --config configs/full_benchmark.yaml --stage run
 ```
 
+Optional Stage-1 optimization flags in config:
+
+- `stage1.cache_noisy_images: true`  
+  Reuse noisy images across models/prompt modes (same dataset/image/noise/level/seed).
+- `stage1.noise_cache_dir: "noise_cache"`  
+  Relative path under `outputs/{exp}` (or absolute path).
+
 Example targeted run:
 
 ```bash
@@ -138,11 +145,19 @@ python main.py --config configs/full_benchmark.yaml --stage all
   - `.../{runner}_{dataset}_{prompt}_stats.csv`
 - Merged stats:
   - `outputs/{exp}/statistics_merged.csv`
-- Figures:
-  - `outputs/{exp}/figures/*.pdf`
+- Noisy image cache:
+  - `outputs/{exp}/noise_cache/{dataset}/{noise}/{level}/seed{n}/{image_id}_{shape}_{sig}.npy`
+- Shared artifacts (saved once, reused across models):
+  - `outputs/{exp}/artifacts/_shared/{dataset}/{noise}/{level}/seed{n}/{image_id}_{original|noisy|gt}.png`
+- Model-specific artifacts:
+  - `outputs/{exp}/artifacts/{dataset}/{model}/{prompt}/{noise}/{level}/seed{n}/{image_id}_pred.png`
+- Publication-ready visualization suite (auto long/wide CSV normalization):
+  - `outputs/visualizations/{dataset_name}/*.pdf`
 
 ## Notes
 
 - Stage 2 never reruns inference.
 - Prompt mode normalization accepts aliases (`bbox`, `point`, `point_box`, etc.).
 - If results look wrong, first inspect prompt columns in raw CSV to verify bbox/point are sensible.
+- Stage 1 supports noisy-image caching (`stage1.cache_noisy_images: true`) to avoid re-applying the same perturbation across models/prompts.
+- Stage 1 artifacts now store shared `original/noisy/gt` once under `artifacts/_shared/...`; model folders keep `*_pred.png`.

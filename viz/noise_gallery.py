@@ -25,6 +25,8 @@ def _collect_artifacts(artifact_root: Path) -> Dict[Tuple[str, str, str, str, st
     mapping: Dict[Tuple[str, str, str, str, str], Dict[str, Path]] = {}
     if not artifact_root.exists():
         return mapping
+
+    # Legacy layout: artifacts/{dataset}/{model}/{prompt}/{noise}/{level}/seedX/*_noisy.png
     for noisy_path in artifact_root.glob("*/*/*/*/*/seed*/*_noisy.png"):
         rel = noisy_path.relative_to(artifact_root)
         if len(rel.parts) < 8:
@@ -33,6 +35,17 @@ def _collect_artifacts(artifact_root: Path) -> Dict[Tuple[str, str, str, str, st
         image_id = noisy_path.stem.replace("_noisy", "")
         key = (dataset, model, prompt_mode, noise_type, image_id)
         mapping.setdefault(key, {})[noise_level] = noisy_path
+
+    # Shared layout: artifacts/_shared/{dataset}/{noise}/{level}/seedX/*_noisy.png
+    for noisy_path in artifact_root.glob("_shared/*/*/*/seed*/*_noisy.png"):
+        rel = noisy_path.relative_to(artifact_root)
+        if len(rel.parts) < 6:
+            continue
+        _, dataset, noise_type, noise_level = rel.parts[:4]
+        image_id = noisy_path.stem.replace("_noisy", "")
+        key = (dataset, "shared", "shared", noise_type, image_id)
+        mapping.setdefault(key, {})[noise_level] = noisy_path
+
     return mapping
 
 
@@ -96,4 +109,3 @@ class NoiseGalleryGenerator:
 def generate_noise_gallery(artifact_root: Path, out_pdf: Path, *, max_rows: int = 12) -> Path:
     gen = NoiseGalleryGenerator(artifact_root, out_pdf.parent)
     return gen.generate(max_rows=max_rows, filename=out_pdf.name)
-

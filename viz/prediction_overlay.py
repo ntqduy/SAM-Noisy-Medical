@@ -20,6 +20,27 @@ def _collect_cases(artifact_root: Path) -> List[Tuple[Path, Path, Path, Path]]:
         original = base.with_name(base.name + "_original.png")
         noisy = base.with_name(base.name + "_noisy.png")
         gt = base.with_name(base.name + "_gt.png")
+
+        # New layout stores original/noisy/gt once under artifacts/_shared.
+        if not (original.exists() and noisy.exists() and gt.exists()):
+            rel = pred_path.relative_to(artifact_root)
+            if len(rel.parts) >= 7:
+                dataset, _, _, noise_type, noise_level, seed_dir = rel.parts[:6]
+                sid = pred_path.stem.replace("_pred", "")
+                shared_dir = (
+                    artifact_root
+                    / "_shared"
+                    / dataset
+                    / noise_type
+                    / noise_level
+                    / seed_dir
+                )
+                shared_original = shared_dir / f"{sid}_original.png"
+                shared_noisy = shared_dir / f"{sid}_noisy.png"
+                shared_gt = shared_dir / f"{sid}_gt.png"
+                if shared_original.exists() and shared_noisy.exists() and shared_gt.exists():
+                    original, noisy, gt = shared_original, shared_noisy, shared_gt
+
         if original.exists() and noisy.exists() and gt.exists():
             cases.append((original, noisy, gt, pred_path))
     return sorted(cases)
@@ -87,4 +108,3 @@ class PredictionVisualizer:
 def generate_prediction_overlays(artifact_root: Path, out_pdf: Path, *, max_cases: int = 20) -> Path:
     vis = PredictionVisualizer(artifact_root, out_pdf.parent)
     return vis.generate(max_cases=max_cases, filename=out_pdf.name)
-
