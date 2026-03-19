@@ -119,33 +119,33 @@ models:
     checkpoint: "weights/sam3.pt"
     prompt_modes: ["prompt_point", "prompt_bbox", "prompt_point_box"]
 
-  - name: "MedSAM"
-    runner: "MEDSAM1"
-    checkpoint: "weights/medsam_vit_b.pth"
-    point_logit_threshold: -1.2
-    # Original MedSAM is box-prompt native in this benchmark.
-    prompt_modes: ["prompt_point", "prompt_bbox", "prompt_point_box"]
+  # - name: "MedSAM"
+  #   runner: "MEDSAM1"
+  #   checkpoint: "weights/medsam_vit_b.pth"
+  #   point_logit_threshold: -1.2
+  #   # Original MedSAM is box-prompt native in this benchmark.
+  #   prompt_modes: ["prompt_point", "prompt_bbox", "prompt_point_box"]
 
-  # MedSAM2 – MedSAM built on SAM2 backbone
-  - name: "MedSAM2"
-    runner: "MEDSAM2"
-    checkpoint: "weights/MedSAM2/MedSAM2_latest.pt"
-    config: "sam2.1_hiera_t512.yaml"
-    prompt_modes: ["prompt_point", "prompt_bbox", "prompt_point_box"]
+  # # MedSAM2 – MedSAM built on SAM2 backbone
+  # - name: "MedSAM2"
+  #   runner: "MEDSAM2"
+  #   checkpoint: "weights/MedSAM2/MedSAM2_latest.pt"
+  #   config: "sam2.1_hiera_t512.yaml"
+  #   prompt_modes: ["prompt_point", "prompt_bbox", "prompt_point_box"]
 
-  # MedSAM3 – LoRA fine-tuned on SAM3 base
-  # Note: Uses SAM3 base weights (weights/sam3.pt) + LoRA adapter
-  - name: "MedSAM3"
-    runner: "MEDSAM3"
-    checkpoint: "weights/sam3.pt"
-    lora_weights: "weights/MedSAM3/best_lora_weights.pt"
-    prompt_modes: ["prompt_point", "prompt_bbox", "prompt_point_box"]
+  # # MedSAM3 – LoRA fine-tuned on SAM3 base
+  # # Note: Uses SAM3 base weights (weights/sam3.pt) + LoRA adapter
+  # - name: "MedSAM3"
+  #   runner: "MEDSAM3"
+  #   checkpoint: "weights/sam3.pt"
+  #   lora_weights: "weights/MedSAM3/best_lora_weights.pt"
+  #   prompt_modes: ["prompt_point", "prompt_bbox", "prompt_point_box"]
 
-  # SAM-Med2D – SAM fine-tuned on large-scale medical 2D dataset
-  - name: "SAM-Med2D"
-    runner: "SAM-MED2D"
-    checkpoint: "weights/sam-med2d_b.pth"
-    prompt_modes: ["prompt_point", "prompt_bbox", "prompt_point_box"]
+  # # SAM-Med2D – SAM fine-tuned on large-scale medical 2D dataset
+  # - name: "SAM-Med2D"
+  #   runner: "SAM-MED2D"
+  #   checkpoint: "weights/sam-med2d_b.pth"
+  #   prompt_modes: ["prompt_point", "prompt_bbox", "prompt_point_box"]
 
   # - name: "UltraSAM"
   #   runner: "ULTRASAM"
