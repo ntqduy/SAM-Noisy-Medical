@@ -82,7 +82,21 @@ class MedSAM3Runner(ModelRunner):
                     if ":" in requested_device:
                         idx = int(requested_device.split(":", 1)[1])
                         torch.cuda.set_device(idx)
-                    load_device = "cuda"
+                    min_free_gb = float(self.model_cfg.get("min_cuda_free_gb_for_load", 6.0))
+                    try:
+                        free_bytes, _ = torch.cuda.mem_get_info()
+                        free_gb = float(free_bytes) / float(1024**3)
+                    except Exception:
+                        free_gb = min_free_gb
+                    if free_gb >= min_free_gb:
+                        load_device = "cuda"
+                    else:
+                        warnings.warn(
+                            f"MedSAM3 detected low free CUDA memory ({free_gb:.2f} GiB). "
+                            "Loading MedSAM3 directly on CPU to avoid CUDA OOM.",
+                            RuntimeWarning,
+                        )
+                        load_device = "cpu"
                 else:
                     load_device = "cpu"
             except Exception:
@@ -99,6 +113,14 @@ class MedSAM3Runner(ModelRunner):
                 self.device = requested_device if load_device == "cuda" else "cpu"
             except Exception as e_cuda:
                 if str(load_device).startswith("cuda"):
+                    try:
+                        import torch
+
+                        if torch.cuda.is_available():
+                            torch.cuda.empty_cache()
+                    except Exception:
+                        pass
+                    gc.collect()
                     warnings.warn(
                         f"MedSAM3 CUDA load failed ({e_cuda}); retrying on CPU.",
                         RuntimeWarning,
