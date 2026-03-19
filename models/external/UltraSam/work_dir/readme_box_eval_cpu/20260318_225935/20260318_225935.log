@@ -1,0 +1,508 @@
+2026/03/18 22:59:35 - mmengine - INFO - 
+------------------------------------------------------------
+System environment:
+    sys.platform: linux
+    Python: 3.10.20 (main, Mar 11 2026, 17:46:40) [GCC 14.3.0]
+    CUDA available: False
+    MUSA available: False
+    numpy_random_seed: 2001574152
+    GCC: gcc (Ubuntu 11.4.0-1ubuntu1~22.04) 11.4.0
+    PyTorch: 2.0.0+cu117
+    PyTorch compiling details: PyTorch built with:
+  - GCC 9.3
+  - C++ Version: 201703
+  - Intel(R) oneAPI Math Kernel Library Version 2022.2-Product Build 20220804 for Intel(R) 64 architecture applications
+  - Intel(R) MKL-DNN v2.7.3 (Git Hash 6dbeffbae1f23cbbeae17adb7b5b13f1f37c080e)
+  - OpenMP 201511 (a.k.a. OpenMP 4.5)
+  - LAPACK is enabled (usually provided by MKL)
+  - NNPACK is enabled
+  - CPU capability usage: AVX2
+  - Build settings: BLAS_INFO=mkl, BUILD_TYPE=Release, CUDA_VERSION=11.7, CUDNN_VERSION=8.5.0, CXX_COMPILER=/opt/rh/devtoolset-9/root/usr/bin/c++, CXX_FLAGS= -D_GLIBCXX_USE_CXX11_ABI=0 -fabi-version=11 -Wno-deprecated -fvisibility-inlines-hidden -DUSE_PTHREADPOOL -DNDEBUG -DUSE_KINETO -DLIBKINETO_NOROCTRACER -DUSE_FBGEMM -DUSE_QNNPACK -DUSE_PYTORCH_QNNPACK -DUSE_XNNPACK -DSYMBOLICATE_MOBILE_DEBUG_HANDLE -O2 -fPIC -Wall -Wextra -Werror=return-type -Werror=non-virtual-dtor -Werror=bool-operation -Wnarrowing -Wno-missing-field-initializers -Wno-type-limits -Wno-array-bounds -Wno-unknown-pragmas -Wunused-local-typedefs -Wno-unused-parameter -Wno-unused-function -Wno-unused-result -Wno-strict-overflow -Wno-strict-aliasing -Wno-error=deprecated-declarations -Wno-stringop-overflow -Wno-psabi -Wno-error=pedantic -Wno-error=redundant-decls -Wno-error=old-style-cast -fdiagnostics-color=always -faligned-new -Wno-unused-but-set-variable -Wno-maybe-uninitialized -fno-math-errno -fno-trapping-math -Werror=format -Werror=cast-function-type -Wno-stringop-overflow, LAPACK_INFO=mkl, PERF_WITH_AVX=1, PERF_WITH_AVX2=1, PERF_WITH_AVX512=1, TORCH_DISABLE_GPU_ASSERTS=ON, TORCH_VERSION=2.0.0, USE_CUDA=ON, USE_CUDNN=ON, USE_EXCEPTION_PTR=1, USE_GFLAGS=OFF, USE_GLOG=OFF, USE_MKL=ON, USE_MKLDNN=ON, USE_MPI=OFF, USE_NCCL=1, USE_NNPACK=ON, USE_OPENMP=ON, USE_ROCM=OFF, 
+
+    TorchVision: 0.15.1+cu117
+    OpenCV: 4.8.1
+    MMEngine: 0.10.7
+
+Runtime environment:
+    cudnn_benchmark: False
+    mp_cfg: {'mp_start_method': 'fork', 'opencv_num_threads': 0}
+    dist_cfg: {'backend': 'nccl'}
+    seed: 2001574152
+    Distributed launcher: none
+    Distributed training: False
+    GPU number: 1
+------------------------------------------------------------
+
+2026/03/18 22:59:35 - mmengine - INFO - Config:
+N_POINTS = 1
+backend_args = None
+custom_hooks = [
+    dict(type='MonkeyPatchHook'),
+]
+custom_imports = dict(
+    allow_failed_imports=False,
+    imports=[
+        'mmpretrain.models',
+        'endosam.datasets.transforms.custom_pipeline',
+        'endosam.datasets.transforms.point_formatting',
+        'endosam.visualization.point_visualization',
+        'endosam.models.detectors.SAM',
+        'endosam.models.backbones.vit_sam',
+        'endosam.models.backbones.MED_SA',
+        'endosam.models.dense_heads.sam_mask_decoder',
+        'endosam.models.dense_heads.sam_mask_class_decoder',
+        'endosam.datasets.evaluation.LabelMetric',
+        'endosam.models.utils.sam_layers',
+        'endosam.models.task_modules.assigners.SAMassigner',
+        'endosam.models.task_modules.prior_generators.prompt_encoder',
+        'endosam.models.task_modules.prior_generators.label_encoder',
+        'endosam.hooks.MonkeyPatchHook',
+        'endosam.hooks.FreezeHook',
+        'endosam.hooks.ValLossHook',
+    ])
+data_preprocessor = dict(
+    bgr_to_rgb=True,
+    mean=[
+        123.675,
+        116.28,
+        103.53,
+    ],
+    pad_size_divisor=1024,
+    std=[
+        58.395,
+        57.12,
+        57.375,
+    ],
+    type='DetDataPreprocessor')
+data_root = 'UltraSAM_DATA/UltraSAM'
+dataset_type = 'CocoDataset'
+default_hooks = dict(
+    checkpoint=dict(
+        by_epoch=False,
+        interval=2000,
+        max_keep_ckpts=1,
+        save_best='coco/segm_mAP',
+        save_optimizer=False,
+        type='CheckpointHook'),
+    logger=dict(interval=50, log_metric_by_epoch=False, type='LoggerHook'),
+    param_scheduler=dict(type='ParamSchedulerHook'),
+    sampler_seed=dict(type='DistSamplerSeedHook'),
+    timer=dict(type='IterTimerHook'),
+    visualization=dict(draw=False, type='DetVisualizationHook'))
+default_scope = 'mmdet'
+dummy_metainfo = dict(classes=('object', ))
+env_cfg = dict(
+    cudnn_benchmark=False,
+    dist_cfg=dict(backend='nccl'),
+    mp_cfg=dict(mp_start_method='fork', opencv_num_threads=0))
+file_client_args = dict(backend='disk')
+launcher = 'none'
+load_from = '/home/ubuntu/SAM-Noisy-Medical/weights/UltraSam.pth'
+log_level = 'INFO'
+log_processor = dict(by_epoch=False, type='LogProcessor', window_size=50)
+model = dict(
+    backbone=dict(
+        arch='base',
+        img_size=1024,
+        out_channels=256,
+        patch_size=16,
+        type='mmpretrain.ViTSAM',
+        use_abs_pos=True,
+        use_rel_pos=True,
+        window_size=14),
+    bbox_head=dict(type='SAMHead'),
+    data_preprocessor=dict(
+        bgr_to_rgb=True,
+        mean=[
+            123.675,
+            116.28,
+            103.53,
+        ],
+        pad_size_divisor=1024,
+        std=[
+            58.395,
+            57.12,
+            57.375,
+        ],
+        type='DetDataPreprocessor'),
+    decoder=dict(
+        layer_cfg=dict(
+            embedding_dim=256,
+            ffn_cfg=dict(
+                embed_dims=256, feedforward_channels=2048, ffn_drop=0.1),
+            num_heads=8),
+        num_layers=2),
+    prompt_encoder=dict(
+        label_encoder=dict(embed_dims=256, type='LabelEmbedEncoder'),
+        type='SAMPaddingGenerator'),
+    train_cfg=dict(assigner=dict(type='SAMassigner')),
+    type='SAM',
+    use_mask_refinement=True)
+optim_wrapper = dict(
+    clip_grad=dict(max_norm=0.1, norm_type=2),
+    optimizer=dict(lr=0.0001, type='AdamW', weight_decay=0.0001),
+    type='OptimWrapper')
+orig_test_evaluator = dict(
+    ann_file=
+    'UltraSAM_DATA/UltraSAM/MMOTU_2d/annotations/test.agnostic.MMOTU_2d__coco.json',
+    backend_args=None,
+    classwise=True,
+    format_only=False,
+    metric=[
+        'bbox',
+        'segm',
+    ],
+    type='CocoMetric')
+orig_val_evaluator = dict(
+    ann_file='UltraSAM_DATA/UltraSAM/test.agnostic.noSmall.coco.json',
+    backend_args=None,
+    classwise=True,
+    format_only=False,
+    metric=[
+        'bbox',
+        'segm',
+    ],
+    type='CocoMetric')
+param_scheduler = [
+    dict(
+        begin=0, by_epoch=False, end=500, start_factor=0.001, type='LinearLR'),
+    dict(
+        begin=0,
+        by_epoch=False,
+        end=30000,
+        gamma=0.1,
+        milestones=[
+            20000,
+            28888,
+        ],
+        type='MultiStepLR'),
+]
+resume = False
+test_cfg = dict(type='TestLoop')
+test_dataloader = dict(
+    batch_size=1,
+    dataset=dict(
+        ann_file='sample_coco_MMOTU2D.json',
+        backend_args=None,
+        data_prefix=dict(img='sample_images'),
+        data_root='sample_dataset',
+        metainfo=dict(classes=('object', )),
+        pipeline=[
+            dict(
+                file_client_args=dict(backend='disk'),
+                type='LoadImageFromFile'),
+            dict(keep_ratio=True, scale=(
+                1024,
+                1024,
+            ), type='FixScaleResize'),
+            dict(type='LoadAnnotations', with_bbox=True, with_mask=True),
+            dict(
+                get_center_point=True,
+                normalize=False,
+                number_of_points=[
+                    1,
+                ],
+                test=True,
+                type='GetPointFromBox'),
+            dict(
+                max_jitter=0.0, normalize=False, test=True,
+                type='GetPointBox'),
+            dict(prompt_probabilities=[
+                0.0,
+                1.0,
+            ], type='GetPromptType'),
+            dict(
+                meta_keys=(
+                    'img_id',
+                    'img_path',
+                    'ori_shape',
+                    'img_shape',
+                    'scale_factor',
+                ),
+                type='PackPointDetInputs'),
+        ],
+        test_mode=True,
+        type='CocoDataset'),
+    drop_last=False,
+    num_workers=2,
+    sampler=dict(shuffle=False, type='DefaultSampler'))
+test_evaluator = dict(
+    ann_file='sample_dataset/sample_coco_MMOTU2D.json',
+    backend_args=None,
+    classwise=True,
+    format_only=False,
+    metric=[
+        'bbox',
+        'segm',
+    ],
+    type='CocoMetric')
+test_pipeline = [
+    dict(file_client_args=dict(backend='disk'), type='LoadImageFromFile'),
+    dict(keep_ratio=True, scale=(
+        1024,
+        1024,
+    ), type='FixScaleResize'),
+    dict(type='LoadAnnotations', with_bbox=True, with_mask=True),
+    dict(
+        get_center_point=True,
+        normalize=False,
+        number_of_points=[
+            1,
+        ],
+        test=True,
+        type='GetPointFromBox'),
+    dict(max_jitter=0.0, normalize=False, test=True, type='GetPointBox'),
+    dict(prompt_probabilities=[
+        0.0,
+        1.0,
+    ], type='GetPromptType'),
+    dict(
+        meta_keys=(
+            'img_id',
+            'img_path',
+            'ori_shape',
+            'img_shape',
+            'scale_factor',
+        ),
+        type='PackPointDetInputs'),
+]
+train_cfg = dict(max_iters=30000, type='IterBasedTrainLoop', val_interval=5000)
+train_dataloader = dict(
+    batch_sampler=dict(type='AspectRatioBatchSampler'),
+    batch_size=8,
+    dataset=dict(
+        ann_file='train.agnostic.noSmall.coco.json',
+        backend_args=None,
+        data_prefix=dict(img=''),
+        data_root='UltraSAM_DATA/UltraSAM',
+        filter_cfg=dict(filter_empty_gt=True),
+        metainfo=dict(classes=('object', )),
+        pipeline=[
+            dict(
+                file_client_args=dict(backend='disk'),
+                type='LoadImageFromFile'),
+            dict(type='LoadAnnotations', with_bbox=True, with_mask=True),
+            dict(prob=0.5, type='RandomFlip'),
+            dict(keep_ratio=True, scale=(
+                1024,
+                1024,
+            ), type='FixScaleResize'),
+            dict(
+                normalize=False,
+                number_of_points=[
+                    1,
+                ],
+                test=False,
+                type='GetPointFromMask'),
+            dict(normalize=False, test=False, type='GetPointBox'),
+            dict(prompt_probabilities=[
+                0.5,
+                0.5,
+            ], type='GetPromptType'),
+            dict(type='PackPointDetInputs'),
+        ],
+        type='CocoDataset'),
+    num_workers=6,
+    persistent_workers=True,
+    sampler=dict(shuffle=True, type='InfiniteSampler'))
+train_pipeline = [
+    dict(file_client_args=dict(backend='disk'), type='LoadImageFromFile'),
+    dict(type='LoadAnnotations', with_bbox=True, with_mask=True),
+    dict(prob=0.5, type='RandomFlip'),
+    dict(keep_ratio=True, scale=(
+        1024,
+        1024,
+    ), type='FixScaleResize'),
+    dict(
+        normalize=False,
+        number_of_points=[
+            1,
+        ],
+        test=False,
+        type='GetPointFromMask'),
+    dict(normalize=False, test=False, type='GetPointBox'),
+    dict(prompt_probabilities=[
+        0.5,
+        0.5,
+    ], type='GetPromptType'),
+    dict(type='PackPointDetInputs'),
+]
+val_cfg = dict(type='ValLoop')
+val_dataloader = dict(
+    batch_size=1,
+    dataset=dict(
+        ann_file='val.agnostic.noSmall.coco.json',
+        backend_args=None,
+        data_prefix=dict(img=''),
+        data_root='UltraSAM_DATA/UltraSAM',
+        metainfo=dict(classes=('object', )),
+        pipeline=[
+            dict(
+                file_client_args=dict(backend='disk'),
+                type='LoadImageFromFile'),
+            dict(keep_ratio=True, scale=(
+                1024,
+                1024,
+            ), type='FixScaleResize'),
+            dict(type='LoadAnnotations', with_bbox=True, with_mask=True),
+            dict(
+                get_center_point=True,
+                normalize=False,
+                number_of_points=[
+                    1,
+                ],
+                test=True,
+                type='GetPointFromBox'),
+            dict(
+                max_jitter=0.0, normalize=False, test=True,
+                type='GetPointBox'),
+            dict(prompt_probabilities=[
+                0.0,
+                1.0,
+            ], type='GetPromptType'),
+            dict(
+                meta_keys=(
+                    'img_id',
+                    'img_path',
+                    'ori_shape',
+                    'img_shape',
+                    'scale_factor',
+                ),
+                type='PackPointDetInputs'),
+        ],
+        test_mode=True,
+        type='CocoDataset'),
+    drop_last=False,
+    num_workers=2,
+    sampler=dict(shuffle=False, type='DefaultSampler'))
+val_evaluator = dict(
+    ann_file='UltraSAM_DATA/UltraSAM/test.agnostic.noSmall.coco.json',
+    backend_args=None,
+    classwise=True,
+    format_only=False,
+    metric=[
+        'bbox',
+        'segm',
+    ],
+    type='CocoMetric')
+vis_backends = [
+    dict(type='LocalVisBackend'),
+    dict(type='TensorboardVisBackend'),
+]
+visualizer = dict(
+    name='visualizer',
+    type='PointVisualizer',
+    vis_backends=[
+        dict(type='LocalVisBackend'),
+        dict(type='TensorboardVisBackend'),
+    ])
+work_dir = './work_dir/readme_box_eval_cpu'
+
+2026/03/18 22:59:36 - mmengine - INFO - Distributed training is not used, all SyncBatchNorm (SyncBN) layers in the model will be automatically reverted to BatchNormXd layers if they are used.
+2026/03/18 22:59:36 - mmengine - INFO - Hooks will be executed in the following order:
+before_run:
+(VERY_HIGH   ) RuntimeInfoHook                    
+(NORMAL      ) MonkeyPatchHook                    
+(BELOW_NORMAL) LoggerHook                         
+ -------------------- 
+before_train:
+(VERY_HIGH   ) RuntimeInfoHook                    
+(NORMAL      ) IterTimerHook                      
+(VERY_LOW    ) CheckpointHook                     
+ -------------------- 
+before_train_epoch:
+(VERY_HIGH   ) RuntimeInfoHook                    
+(NORMAL      ) IterTimerHook                      
+(NORMAL      ) DistSamplerSeedHook                
+ -------------------- 
+before_train_iter:
+(VERY_HIGH   ) RuntimeInfoHook                    
+(NORMAL      ) IterTimerHook                      
+ -------------------- 
+after_train_iter:
+(VERY_HIGH   ) RuntimeInfoHook                    
+(NORMAL      ) IterTimerHook                      
+(BELOW_NORMAL) LoggerHook                         
+(LOW         ) ParamSchedulerHook                 
+(VERY_LOW    ) CheckpointHook                     
+ -------------------- 
+after_train_epoch:
+(NORMAL      ) IterTimerHook                      
+(LOW         ) ParamSchedulerHook                 
+(VERY_LOW    ) CheckpointHook                     
+ -------------------- 
+before_val:
+(VERY_HIGH   ) RuntimeInfoHook                    
+ -------------------- 
+before_val_epoch:
+(NORMAL      ) IterTimerHook                      
+ -------------------- 
+before_val_iter:
+(NORMAL      ) IterTimerHook                      
+ -------------------- 
+after_val_iter:
+(NORMAL      ) IterTimerHook                      
+(NORMAL      ) DetVisualizationHook               
+(BELOW_NORMAL) LoggerHook                         
+ -------------------- 
+after_val_epoch:
+(VERY_HIGH   ) RuntimeInfoHook                    
+(NORMAL      ) IterTimerHook                      
+(BELOW_NORMAL) LoggerHook                         
+(LOW         ) ParamSchedulerHook                 
+(VERY_LOW    ) CheckpointHook                     
+ -------------------- 
+after_val:
+(VERY_HIGH   ) RuntimeInfoHook                    
+ -------------------- 
+after_train:
+(VERY_HIGH   ) RuntimeInfoHook                    
+(VERY_LOW    ) CheckpointHook                     
+ -------------------- 
+before_test:
+(VERY_HIGH   ) RuntimeInfoHook                    
+ -------------------- 
+before_test_epoch:
+(NORMAL      ) IterTimerHook                      
+ -------------------- 
+before_test_iter:
+(NORMAL      ) IterTimerHook                      
+ -------------------- 
+after_test_iter:
+(NORMAL      ) IterTimerHook                      
+(NORMAL      ) DetVisualizationHook               
+(BELOW_NORMAL) LoggerHook                         
+ -------------------- 
+after_test_epoch:
+(VERY_HIGH   ) RuntimeInfoHook                    
+(NORMAL      ) IterTimerHook                      
+(BELOW_NORMAL) LoggerHook                         
+ -------------------- 
+after_test:
+(VERY_HIGH   ) RuntimeInfoHook                    
+ -------------------- 
+after_run:
+(BELOW_NORMAL) LoggerHook                         
+ -------------------- 
+2026/03/18 22:59:37 - mmengine - INFO - Load checkpoint from /home/ubuntu/SAM-Noisy-Medical/weights/UltraSam.pth
+2026/03/18 22:59:38 - mmengine - WARNING - "FileClient" will be deprecated in future. Please use io functions in https://mmengine.readthedocs.io/en/latest/api/fileio.html#file-io
+2026/03/18 22:59:38 - mmengine - WARNING - "HardDiskBackend" is the alias of "LocalBackend" and the former will be deprecated in future.
+2026/03/18 22:59:38 - mmengine - WARNING - "FileClient" will be deprecated in future. Please use io functions in https://mmengine.readthedocs.io/en/latest/api/fileio.html#file-io
+2026/03/18 22:59:38 - mmengine - WARNING - "HardDiskBackend" is the alias of "LocalBackend" and the former will be deprecated in future.
+2026/03/18 23:01:35 - mmengine - INFO - Evaluating bbox...
+2026/03/18 23:01:35 - mmengine - INFO - 
++----------+-------+--------+--------+-------+-------+-------+
+| category | mAP   | mAP_50 | mAP_75 | mAP_s | mAP_m | mAP_l |
++----------+-------+--------+--------+-------+-------+-------+
+| object   | 0.861 | 1.0    | 1.0    | nan   | 0.85  | 0.869 |
++----------+-------+--------+--------+-------+-------+-------+
+2026/03/18 23:01:35 - mmengine - INFO - bbox_mAP_copypaste: 0.861 1.000 1.000 -1.000 0.850 0.869
+2026/03/18 23:01:35 - mmengine - INFO - Evaluating segm...
+2026/03/18 23:01:35 - mmengine - INFO - 
++----------+-------+--------+--------+-------+-------+-------+
+| category | mAP   | mAP_50 | mAP_75 | mAP_s | mAP_m | mAP_l |
++----------+-------+--------+--------+-------+-------+-------+
+| object   | 0.752 | 1.0    | 0.871  | nan   | 0.601 | 0.793 |
++----------+-------+--------+--------+-------+-------+-------+
+2026/03/18 23:01:35 - mmengine - INFO - segm_mAP_copypaste: 0.752 1.000 0.871 -1.000 0.601 0.793
+2026/03/18 23:01:35 - mmengine - INFO - Iter(test) [10/10]    coco/object_precision: 0.7520  coco/bbox_mAP: 0.8610  coco/bbox_mAP_50: 1.0000  coco/bbox_mAP_75: 1.0000  coco/bbox_mAP_s: -1.0000  coco/bbox_mAP_m: 0.8500  coco/bbox_mAP_l: 0.8690  coco/segm_mAP: 0.7520  coco/segm_mAP_50: 1.0000  coco/segm_mAP_75: 0.8710  coco/segm_mAP_s: -1.0000  coco/segm_mAP_m: 0.6010  coco/segm_mAP_l: 0.7930  data_time: 0.0136  time: 11.7897

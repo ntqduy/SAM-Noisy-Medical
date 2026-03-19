@@ -294,7 +294,11 @@ class ExperimentEngine:
                     )
 
                     resolved_prompt = resolve_prompt(
-                        {"gt_mask": gt_mask},
+                        {
+                            "gt_mask": gt_mask,
+                            "noise_seed": case.noise_seed,
+                            "noise_level": case.noise_level,
+                        },
                         image.shape[:2],
                         prompt_mode=prompt_mode,
                     )

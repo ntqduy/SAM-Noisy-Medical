@@ -111,6 +111,7 @@ models:
   - name: "SAM2"
     runner: "SAM2"
     checkpoint: "weights/sam2_b.pt"
+    config: "configs/sam2/sam2_hiera_b+.yaml"
     prompt_modes: ["prompt_point", "prompt_bbox", "prompt_point_box"]
 
   - name: "SAM3"
@@ -121,6 +122,7 @@ models:
   - name: "MedSAM"
     runner: "MEDSAM1"
     checkpoint: "weights/medsam_vit_b.pth"
+    # Original MedSAM is box-prompt native in this benchmark.
     prompt_modes: ["prompt_point", "prompt_bbox", "prompt_point_box"]
 
   # MedSAM2 – MedSAM built on SAM2 backbone
@@ -141,13 +143,15 @@ models:
   # SAM-Med2D – SAM fine-tuned on large-scale medical 2D dataset
   - name: "SAM-Med2D"
     runner: "SAM-MED2D"
-    checkpoint: "weights/sam_med2d.pt"
+    checkpoint: "weights/sam-med2d_b.pth"
     prompt_modes: ["prompt_point", "prompt_bbox", "prompt_point_box"]
 
-  # - name: "UltraSAM"
-  #   runner: "ULTRASAM"
-  #   checkpoint: "weights/UltraSam.pth"
-  #   prompt_modes: ["prompt_point", "prompt_bbox", "prompt_point_box"]
+  - name: "UltraSAM"
+    runner: "ULTRASAM"
+    checkpoint: "weights/UltraSam.pth"
+    prompt_modes: ["prompt_point","prompt_bbox","prompt_point_box"]
+    config: "models/external/UltraSam/configs/UltraSAM/UltraSAM_full/UltraSAM_box_no_refine.py"
+    force_box_for_point: true
 
 # ─────────────────────────────────────────────────────────────────────────
 #  NOISE TYPES & LEVELS

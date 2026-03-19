@@ -132,7 +132,7 @@ def build_prompt(
     gt_mask: Optional[np.ndarray],
     image_shape: Tuple[int, int],
     k_points: int = 3,
-    single_point: bool = False,
+    single_point: bool = True,
 ) -> Dict[str, Any]:
     """
     Build a prompt payload dict.
@@ -218,12 +218,31 @@ def resolve_prompt(
     gt_mask = prompt.get("gt_mask")
     mode = normalize_prompt_mode(prompt_mode) if prompt_mode is not None else None
 
-    k_default = 3 if mode == "prompt_multi_point" else 1
+    # Heuristic: number of oracle points scales with object size (3–5).
+    k_default = 3 if mode in ("prompt_point", "prompt_multi_point", "prompt_point_box") else 1
+    fg_ratio = 0.0
+    m_bool = None
+    if prompt.get("gt_mask") is not None:
+        m_bool = np.asarray(prompt["gt_mask"]).astype(bool)
+        fg_ratio = float(m_bool.sum()) / float(max(1, m_bool.size))
+    if fg_ratio > 0.05:
+        k_default = 5
+    elif fg_ratio > 0.01:
+        k_default = 4
     k_points = int(max(1, prompt.get("k_points", k_default)))
-    single_point_default = mode in ("prompt_point", "prompt_point_box")
+
+    # Random seed to vary points across noise levels/seeds.
+    seed_tuple = (
+        prompt.get("noise_seed", 0),
+        str(prompt.get("noise_level", "")),
+        prompt.get("seed", 0),
+    )
+    rng_seed = np.uint32(abs(hash(seed_tuple)) % (2**32))
+    rng = np.random.default_rng(int(rng_seed))
+
+    # For oracle point modes we allow multiple points; disable single-click clamp.
+    single_point_default = False if mode in ("prompt_point", "prompt_point_box", "prompt_multi_point") else True
     single_point = bool(prompt.get("single_point", single_point_default))
-    if mode == "prompt_point" and bool(prompt.get("legacy_single_point", False)):
-        single_point = True
 
     user_point = prompt.get("point")
     user_bbox = prompt.get("bbox")
@@ -260,16 +279,23 @@ def resolve_prompt(
 
     if gt_mask is not None and np.asarray(gt_mask).astype(bool).any():
         fg_coords = _foreground_coords(gt_mask)
-        if point is None:
-            sampled_one = mask_to_points(gt_mask, k=1, fg_coords=fg_coords)
-            if sampled_one.shape[0] > 0:
-                point = _clip_point((int(sampled_one[0, 0]), int(sampled_one[0, 1])), image_shape)
-        if points_arr is None:
-            n_points = 1 if single_point else k_points
-            sampled = mask_to_points(gt_mask, k=n_points, fg_coords=fg_coords)
-            if sampled.shape[0] > 0:
+        if fg_coords.shape[0] > 0:
+            if single_point:
+                # Deterministic single-click: use centroid for stability.
+                centroid = mask_centroid(gt_mask, fg_coords=fg_coords)
+                if centroid is not None:
+                    cx, cy = centroid
+                    points_arr = np.asarray([[int(cx), int(cy)]], dtype=np.int32)
+                    labels_arr = np.ones((1,), dtype=np.int32)
+                    point = (int(cx), int(cy))
+            if points_arr is None:
+                # Randomly sample k_points distinct coords inside mask (oracle, but varied).
+                n_points = min(k_points, fg_coords.shape[0])
+                idx = rng.choice(fg_coords.shape[0], size=n_points, replace=False)
+                sampled = fg_coords[idx]
                 points_arr = sampled.astype(np.int32)
                 labels_arr = np.ones((points_arr.shape[0],), dtype=np.int32)
+                point = (int(points_arr[0, 0]), int(points_arr[0, 1]))
         if bbox is None:
             bbox = _clip_bbox(mask_to_bbox(gt_mask, fg_coords=fg_coords), image_shape)
 
@@ -283,11 +309,41 @@ def resolve_prompt(
     if bbox is None:
         bbox = (w // 4, h // 4, 3 * w // 4, 3 * h // 4)
 
-    # Keep backward compatibility: "point" mirrors first sampled point.
-    point = (int(points_arr[0, 0]), int(points_arr[0, 1]))
+    # Optional negative background point (outside FG) to make prompts more realistic.
+    if mode in ("prompt_point", "prompt_point_box", "prompt_multi_point") and m_bool is not None:
+        bg_coords = np.argwhere(~m_bool)
+        if bg_coords.shape[0] > 0 and points_arr is not None:
+            # Sample one negative point using the same RNG.
+            idx_bg = rng.integers(0, bg_coords.shape[0])
+            neg_y, neg_x = bg_coords[idx_bg]
+            neg_pt = np.asarray([[int(neg_x), int(neg_y)]], dtype=np.int32)
+            points_arr = np.concatenate([points_arr, neg_pt], axis=0)
+            labels_arr = np.concatenate([labels_arr, np.zeros((1,), dtype=np.int32)], axis=0)
+
+    # Enforce strict prompt-mode separation to avoid leakage across modes.
+    if mode == "prompt_point":
+        # Point-only: drop any bbox; keep multi-point clicks.
+        bbox = None
+        single_point = False
+    elif mode == "prompt_multi_point":
+        bbox = None
+        single_point = False
+    elif mode == "prompt_bbox":
+        points_arr = None
+        labels_arr = None
+        point = None
+        single_point = False
+    elif mode == "prompt_point_box":
+        # Keep both; allow multi-point oracle clicks (including one optional negative).
+        single_point = False
+
+    # Keep backward compatibility: "point" mirrors first sampled foreground point when present.
+    point_for_logging = None
+    if points_arr is not None and points_arr.shape[0] > 0:
+        point_for_logging = (int(points_arr[0, 0]), int(points_arr[0, 1]))
 
     return {
-        "point": point,
+        "point": point_for_logging,
         "points": points_arr,
         "point_labels": labels_arr,
         "single_point": single_point,
@@ -314,9 +370,8 @@ def build_sam_prompt_kwargs(
     batched_box: bool = False,
 ) -> Dict[str, Any]:
     """Build prompt kwargs for SAM/SAM2-compatible predictors."""
-    # SAM-family models usually benefit from multi-mask for ambiguous single-click prompts.
-    single_click = prompt_mode == "prompt_point" and bool(prompt.get("single_point", True))
-    kwargs: Dict[str, Any] = {"multimask_output": bool(single_click)}
+    # Always request multiple masks; caller will pick the best.
+    kwargs: Dict[str, Any] = {"multimask_output": True}
 
     bbox = prompt.get("bbox")
     if prompt_mode in ("prompt_bbox", "prompt_point_box") and bbox is not None:
@@ -341,7 +396,7 @@ def build_sam_prompt_kwargs(
                 labels = np.concatenate([labels, pad], axis=0)
             labels = labels[: point_coords.shape[0]]
 
-        if prompt_mode in ("prompt_point", "prompt_point_box") and bool(prompt.get("single_point", True)):
+        if prompt_mode in ("prompt_point", "prompt_point_box") and bool(prompt.get("single_point", False)):
             point_coords = point_coords[:1]
             labels = labels[:1]
 

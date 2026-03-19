@@ -74,6 +74,33 @@ class SAM2Runner(ModelRunner):
                     ckpt = ckpt_in_weights
 
             cfg_path = self.model_cfg.get("config", "configs/sam2/sam2_hiera_b+.yaml")
+            cfg_candidates = [cfg_path]
+            if not os.path.isabs(cfg_path):
+                cfg_candidates.append(os.path.join(project_root, cfg_path))
+                cfg_candidates.append(os.path.join(sam2_root, cfg_path))
+            cfg_base = os.path.basename(cfg_path)
+            cfg_candidates.append(os.path.join(sam2_root, "sam2", "configs", "sam2", cfg_base))
+            cfg_candidates.append(os.path.join(sam2_root, "sam2", "configs", "sam2.1", cfg_base))
+            cfg_candidates.append(os.path.join(sam2_root, "sam2", cfg_base))
+            cfg_path = next((p for p in cfg_candidates if os.path.exists(p)), cfg_path)
+
+            # SAM2's hydra compose expects a package-relative config name (e.g. configs/sam2/...).
+            cfg_name = str(cfg_path).replace("\\", "/")
+            if os.path.isabs(cfg_path):
+                sam2_pkg_root = os.path.join(sam2_root, "sam2")
+                try:
+                    rel_cfg = os.path.relpath(cfg_path, sam2_pkg_root).replace("\\", "/")
+                    if not rel_cfg.startswith("../") and rel_cfg != "..":
+                        cfg_name = rel_cfg
+                except Exception:
+                    pass
+
+            if cfg_name.endswith(".yaml") and "/" not in cfg_name:
+                if "sam2.1" in cfg_name:
+                    cfg_name = f"configs/sam2.1/{cfg_name}"
+                else:
+                    cfg_name = f"configs/sam2/{cfg_name}"
+
             load_device = self.device
             if str(self.device).startswith("cuda"):
                 try:
@@ -96,7 +123,7 @@ class SAM2Runner(ModelRunner):
                     pass
 
             try:
-                sam2 = build_sam2(cfg_path, ckpt, device=load_device)
+                sam2 = build_sam2(cfg_name, ckpt, device=load_device)
                 self.device = load_device
             except Exception as e_cuda:
                 # On some machines (e.g., newer GPUs with older torch builds),
@@ -106,7 +133,7 @@ class SAM2Runner(ModelRunner):
                         f"SAM2 CUDA load failed ({e_cuda}); retrying on CPU.",
                         RuntimeWarning,
                     )
-                    sam2 = build_sam2(cfg_path, ckpt, device="cpu")
+                    sam2 = build_sam2(cfg_name, ckpt, device="cpu")
                     self.device = "cpu"
                 else:
                     raise

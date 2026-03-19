@@ -215,6 +215,12 @@ def parse_args():
         help="Comma-separated model names/runners to run in stage 'run'",
     )
     ap.add_argument(
+        "--model",
+        type=str,
+        default=None,
+        help="Alias of --models for a single model name",
+    )
+    ap.add_argument(
         "--device",
         type=str,
         default=None,
@@ -247,7 +253,8 @@ def main():
     exp_dir = cm.exp_dir
     devices = cm.devices
     dataset_filter = [x.strip() for x in args.datasets.split(",")] if args.datasets else None
-    model_filter = [x.strip() for x in args.models.split(",")] if args.models else None
+    raw_models = args.models or args.model
+    model_filter = [x.strip() for x in raw_models.split(",")] if raw_models else None
 
     print(f"[Config] Device(s): {devices}")
 

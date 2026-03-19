@@ -2,6 +2,9 @@
 # UltraSam requirements
 # =========================
 
+# Keep setuptools version that still provides pkg_resources for legacy builds.
+setuptools<81
+
 # Core deep learning stack (CUDA-specific torch wheel should be installed separately if needed)
 torch==2.0.0
 torchvision==0.15.1
@@ -10,16 +13,22 @@ torchaudio==2.0.1
 # OpenMMLab ecosystem
 openmim>=0.3.9
 mmengine>=0.8.0
-mmcv==2.1.0
+# Use lite build to avoid native compilation path in environments without prebuilt mmcv wheels.
+mmcv-lite==2.1.0
 mmdet>=3.0.0
 mmpretrain>=1.0.0
 
+# UltraSAM note:
+# - For true UltraSAM MMDetection execution, install full mmcv in the UltraSAM env:
+#     mim install "mmcv==2.1.0"
+# - Keep NumPy < 2 with torch==2.0.x to avoid runtime ABI issues.
+
 # Core scientific and image processing deps used in UltraSam code
-numpy>=1.23
+numpy>=1.23,<2
 scipy>=1.10
 pandas>=1.5
 matplotlib>=3.6
-opencv-python>=4.8
+opencv-python>=4.8,<4.9
 Pillow>=9.5
 scikit-image>=0.20
 SimpleITK>=2.2

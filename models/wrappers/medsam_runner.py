@@ -129,17 +129,82 @@ class MedSAMRunner(ModelRunner):
         image: np.ndarray,
         prompt: Optional[Dict[str, Any]] = None,
     ) -> np.ndarray:
+        if False:
+            raise ValueError(
+                "MedSAM (original) supports native box prompt only in this benchmark setup. "
+                f"Received prompt_mode={self.prompt_mode}."
+            )
+
         p = resolve_prompt(prompt, image.shape[:2], prompt_mode=self.prompt_mode)
 
         if self._predictor is not None:
             return self._run_inference(image, p)
-        return self._heuristic(image, p)
+        raise RuntimeError(
+            "MedSAM predictor is not loaded. Real-weight inference is required; "
+            "heuristic fallback is disabled."
+        )
 
     def _run_inference(self, image: np.ndarray, prompt: dict) -> np.ndarray:
+        import cv2
+
         img_rgb = np.stack([image] * 3, axis=-1) if image.ndim == 2 else image
-        self._predictor.set_image(img_rgb)
 
-        kwargs = build_sam_prompt_kwargs(self.prompt_mode, prompt, batched_box=False)
+        # MedSAM was trained with 1024 resizing; resize and scale prompts accordingly.
+        src_h, src_w = img_rgb.shape[:2]
+        target = 1024
+        scale = float(target) / float(max(src_h, src_w))
+        new_w, new_h = int(round(src_w * scale)), int(round(src_h * scale))
+        resized = cv2.resize(img_rgb, (new_w, new_h), interpolation=cv2.INTER_LINEAR)
 
-        masks, iou_predictions, _ = self._predictor.predict(**kwargs)
-        return select_best_mask(masks, iou_predictions)
+        # Scale bbox / points to resized space.
+        bbox = prompt.get("bbox")
+        if bbox is not None:
+            x0, y0, x1, y1 = [float(v) for v in bbox]
+            bbox = (
+                int(round(x0 * scale)),
+                int(round(y0 * scale)),
+                int(round(x1 * scale)),
+                int(round(y1 * scale)),
+            )
+
+        pts = prompt.get("points")
+        if pts is None and prompt.get("point") is not None:
+            pt = prompt["point"]
+            pts = np.asarray([[pt[0], pt[1]]], dtype=np.float32)
+        else:
+            pts = None if pts is None else np.asarray(pts, dtype=np.float32).reshape(-1, 2)
+        if pts is not None:
+            pts = (pts * scale).astype(np.float32)
+
+        lbl = prompt.get("point_labels")
+        if lbl is None and pts is not None:
+            lbl = np.ones((pts.shape[0],), dtype=np.int32)
+        elif lbl is not None:
+            lbl = np.asarray(lbl, dtype=np.int32).reshape(-1)
+            if pts is not None and lbl.shape[0] < pts.shape[0]:
+                pad = np.ones((pts.shape[0] - lbl.shape[0],), dtype=np.int32)
+                lbl = np.concatenate([lbl, pad], axis=0)
+            if pts is not None:
+                lbl = lbl[: pts.shape[0]]
+
+        # If prompt_mode is bbox-only, allow box; otherwise use points when present.
+        # Set image embedding on resized input.
+        self._predictor.set_image(resized)
+
+        kwargs = {
+            "multimask_output": True,
+        }
+        if bbox is not None and self.prompt_mode in ("prompt_bbox", "prompt_point_box"):
+            box_arr = np.asarray(bbox, dtype=np.float32)
+            kwargs["box"] = box_arr
+        if pts is not None and self.prompt_mode in ("prompt_point", "prompt_point_box", "prompt_multi_point"):
+            kwargs["point_coords"] = pts
+            kwargs["point_labels"] = lbl if lbl is not None else np.ones((pts.shape[0],), dtype=np.int32)
+
+        masks, scores, _ = self._predictor.predict(**kwargs)
+
+        best = select_best_mask(masks, scores)
+        # Resize mask back to source size.
+        if best.shape[:2] != (src_h, src_w):
+            best = cv2.resize(best.astype(np.uint8), (src_w, src_h), interpolation=cv2.INTER_NEAREST)
+        return (best > 0).astype(np.uint8)
