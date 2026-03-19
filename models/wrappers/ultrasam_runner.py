@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import os
 import sys
+import traceback
 import warnings
 from typing import Any, Dict, Optional
 
@@ -41,9 +42,13 @@ class UltraSAMRunner(ModelRunner):
 
     def load_model(self) -> None:
         try:
+            UltraSamPredictor = None
             try:
                 from ultrasam import UltraSamPredictor
-            except ModuleNotFoundError:
+            except Exception:
+                UltraSamPredictor = None
+
+            if UltraSamPredictor is None:
                 # Try bundled UltraSam source tree first.
                 ultrasam_root = os.path.abspath(
                     os.path.join(os.path.dirname(__file__), os.pardir, "external", "UltraSam")
@@ -112,15 +117,17 @@ class UltraSAMRunner(ModelRunner):
                         RuntimeWarning,
                     )
                 elif self.prompt_mode == "prompt_point_box":
-                    raise ValueError(
-                        "UltraSAM MMDet backend does not provide a single native point+box prompt mode. "
-                        "Use prompt_point or prompt_bbox for true native evaluation."
+                    warnings.warn(
+                        "UltraSAM MMDet backend will run point+box as two real passes "
+                        "(point and box) and fuse masks.",
+                        RuntimeWarning,
                     )
                 return
 
-            ckpt = self.model_cfg.get("checkpoint", "weights/UltraSam.pth")
-            self._model = UltraSamPredictor(checkpoint=ckpt, device=self.device)
-            self._backend = "predictor"
+            else:
+                ckpt = self.model_cfg.get("checkpoint", "weights/UltraSam.pth")
+                self._model = UltraSamPredictor(checkpoint=ckpt, device=self.device)
+                self._backend = "predictor"
         except Exception as e:
             install_hint = (
                 "Install UltraSAM deps in your active env, e.g.: "
@@ -129,12 +136,15 @@ class UltraSAMRunner(ModelRunner):
                 "mim install 'mmcv==2.1.0' && "
                 "mim install mmdet mmpretrain"
             )
+            err_msg = f"{type(e).__name__}: {e!r}"
+            tb_last = traceback.format_exc(limit=1).strip().splitlines()[-1] if True else ""
             warnings.warn(
                 "UltraSAM load failed. The current wrapper expects a Python module "
                 "`ultrasam` exposing `UltraSamPredictor`, but this module is not present "
                 "in the provided env/repo. If you want true UltraSAM inference, install the "
                 "matching predictor package used by this wrapper or implement an MMDetection-"
-                f"based adapter for `models/external/UltraSam`. {install_hint}. Root error: {e}",
+                f"based adapter for `models/external/UltraSam`. {install_hint}. "
+                f"Root error: {err_msg}. Trace: {tb_last}",
                 RuntimeWarning,
             )
             self._model = None
@@ -184,10 +194,27 @@ class UltraSAMRunner(ModelRunner):
             return self._predict_mmdet_single_prompt(img_rgb, prompt, prompt_variant="point")
         if self.prompt_mode == "prompt_bbox":
             return self._predict_mmdet_single_prompt(img_rgb, prompt, prompt_variant="box")
+        if self.prompt_mode == "prompt_point_box":
+            box_mask = self._predict_mmdet_single_prompt(img_rgb, prompt, prompt_variant="box")
+            try:
+                point_mask = self._predict_mmdet_single_prompt(img_rgb, prompt, prompt_variant="point")
+            except Exception as e:
+                warnings.warn(
+                    "UltraSAM point+box fusion failed on point branch; "
+                    f"falling back to box branch only. Root error: {type(e).__name__}: {e}",
+                    RuntimeWarning,
+                )
+                return box_mask
+
+            inter = ((point_mask > 0) & (box_mask > 0)).astype(np.uint8)
+            if int(inter.sum()) > 0:
+                return inter
+            union = ((point_mask > 0) | (box_mask > 0)).astype(np.uint8)
+            return union
 
         raise ValueError(
             "Unsupported UltraSAM prompt mode for MMDet backend: "
-            f"{self.prompt_mode}. Only prompt_point and prompt_bbox are native."
+            f"{self.prompt_mode}. Supported: prompt_point, prompt_bbox, prompt_point_box."
         )
 
     def _predict_mmdet_single_prompt(

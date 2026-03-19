@@ -201,9 +201,44 @@ class MedSAMRunner(ModelRunner):
             kwargs["point_coords"] = pts
             kwargs["point_labels"] = lbl if lbl is not None else np.ones((pts.shape[0],), dtype=np.int32)
 
-        masks, scores, _ = self._predictor.predict(**kwargs)
+        if self.prompt_mode == "prompt_point" and pts is not None:
+            # Point-only MedSAM can return tiny binary masks at threshold 0.
+            # Use logits with a lower threshold and keep the component around the click.
+            masks, scores, logits = self._predictor.predict(return_logits=True, **kwargs)
+            logit_thresh = float(self.model_cfg.get("point_logit_threshold", -1.2))
+            point_xy = prompt.get("point")
 
-        best = select_best_mask(masks, scores)
+            logits_arr = np.asarray(logits)
+            if logits_arr.ndim == 2:
+                logits_arr = logits_arr[None, ...]
+
+            best = None
+            best_area = -1
+            for lo in logits_arr:
+                bin_mask = (lo > logit_thresh).astype(np.uint8)
+
+                if point_xy is not None:
+                    px = int(round(float(point_xy[0]) * scale))
+                    py = int(round(float(point_xy[1]) * scale))
+                    px = int(np.clip(px, 0, bin_mask.shape[1] - 1))
+                    py = int(np.clip(py, 0, bin_mask.shape[0] - 1))
+                    num_labels, labels, _, _ = cv2.connectedComponentsWithStats(bin_mask, 8)
+                    if num_labels > 1:
+                        click_label = int(labels[py, px])
+                        if click_label > 0:
+                            bin_mask = (labels == click_label).astype(np.uint8)
+
+                area = int(bin_mask.sum())
+                if area > best_area:
+                    best_area = area
+                    best = bin_mask
+
+            if best is None:
+                best = select_best_mask(masks, scores)
+        else:
+            masks, scores, _ = self._predictor.predict(**kwargs)
+            best = select_best_mask(masks, scores)
+
         # Resize mask back to source size.
         if best.shape[:2] != (src_h, src_w):
             best = cv2.resize(best.astype(np.uint8), (src_w, src_h), interpolation=cv2.INTER_NEAREST)
