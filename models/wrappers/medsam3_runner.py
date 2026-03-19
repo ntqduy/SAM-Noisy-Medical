@@ -73,7 +73,20 @@ class MedSAM3Runner(ModelRunner):
                 "lora_weights", "weights/MedSAM3/best_lora_weights.pt"
             )
 
-            load_device = self.device
+            requested_device = str(self.device)
+            load_device = "cpu"
+            try:
+                import torch
+
+                if requested_device.startswith("cuda") and torch.cuda.is_available():
+                    if ":" in requested_device:
+                        idx = int(requested_device.split(":", 1)[1])
+                        torch.cuda.set_device(idx)
+                    load_device = "cuda"
+                else:
+                    load_device = "cpu"
+            except Exception:
+                load_device = "cpu"
             try:
                 self._model = build_sam3_image_model(
                     device=load_device,
@@ -83,7 +96,7 @@ class MedSAM3Runner(ModelRunner):
                     enable_inst_interactivity=True,
                     eval_mode=False,
                 )
-                self.device = load_device
+                self.device = requested_device if load_device == "cuda" else "cpu"
             except Exception as e_cuda:
                 if str(load_device).startswith("cuda"):
                     warnings.warn(

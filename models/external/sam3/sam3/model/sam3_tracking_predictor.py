@@ -4,6 +4,7 @@
 
 import logging
 from collections import OrderedDict
+from contextlib import nullcontext
 
 import torch
 from sam3.model.sam3_tracker_base import concat_points, NO_OBJ_SCORE, Sam3TrackerBase
@@ -47,8 +48,12 @@ class Sam3TrackerPredictor(Sam3TrackerBase):
         self.max_point_num_in_prompt_enc = max_point_num_in_prompt_enc
         self.non_overlap_masks_for_output = non_overlap_masks_for_output
 
-        self.bf16_context = torch.autocast(device_type="cuda", dtype=torch.bfloat16)
-        self.bf16_context.__enter__()  # keep using for the entire model process
+        use_cuda_context = torch.cuda.is_available() and str(self.device).startswith("cuda")
+        if use_cuda_context:
+            self.bf16_context = torch.autocast(device_type="cuda", dtype=torch.bfloat16)
+            self.bf16_context.__enter__()  # keep using for the entire model process
+        else:
+            self.bf16_context = nullcontext()
 
         self.iter_use_prev_mask_pred = True
         self.add_all_frames_to_correct_as_cond = True
@@ -76,7 +81,7 @@ class Sam3TrackerPredictor(Sam3TrackerBase):
         # and from 24 to 21 when tracking two objects)
         inference_state["offload_state_to_cpu"] = offload_state_to_cpu
         inference_state["device"] = self.device
-        if offload_state_to_cpu:
+        if offload_state_to_cpu or str(self.device).startswith("cpu"):
             inference_state["storage_device"] = torch.device("cpu")
         else:
             inference_state["storage_device"] = torch.device("cuda")

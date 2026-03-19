@@ -66,7 +66,20 @@ class SAM3Runner(ModelRunner):
                 if os.path.exists(ckpt_in_weights):
                     ckpt = ckpt_in_weights
 
-            load_device = self.device
+            requested_device = str(self.device)
+            load_device = "cpu"
+            try:
+                import torch
+
+                if requested_device.startswith("cuda") and torch.cuda.is_available():
+                    if ":" in requested_device:
+                        idx = int(requested_device.split(":", 1)[1])
+                        torch.cuda.set_device(idx)
+                    load_device = "cuda"
+                else:
+                    load_device = "cpu"
+            except Exception:
+                load_device = "cpu"
             try:
                 self._model = build_sam3_image_model(
                     device=load_device,
@@ -75,7 +88,7 @@ class SAM3Runner(ModelRunner):
                     load_from_HF=False,
                     enable_inst_interactivity=True,
                 )
-                self.device = load_device
+                self.device = requested_device if load_device == "cuda" else "cpu"
             except Exception as e_cuda:
                 if str(load_device).startswith("cuda"):
                     warnings.warn(
