@@ -35,6 +35,7 @@ datasets:
     mask:
       type: "binary_0_255"
       class_id: 1
+      threshold: 127
 
   - name: "TG3K"
     adapter: "ImageMaskFolderAdapter"
@@ -46,6 +47,7 @@ datasets:
     mask:
       type: "binary_0_255"
       class_id: 1
+      threshold: 127
 
 models:
   - name: "SAM"

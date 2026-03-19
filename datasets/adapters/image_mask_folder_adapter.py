@@ -24,10 +24,15 @@ def _read_gray_uint8(p: Path) -> np.ndarray:
     return arr.astype(np.uint8) if arr.dtype != np.uint8 else arr
 
 
-def _read_mask(p: Path, mask_type: str, class_id: int = 1) -> np.ndarray:
+def _read_mask(
+    p: Path,
+    mask_type: str,
+    class_id: int = 1,
+    binary_threshold: int = 0,
+) -> np.ndarray:
     m = _read_gray_uint8(p)
     if mask_type == "binary_0_255":
-        return (m > 0).astype(np.uint8)
+        return (m > int(binary_threshold)).astype(np.uint8)
     if mask_type == "multiclass":
         return (m == int(class_id)).astype(np.uint8)
     raise ValueError(f"Unknown mask.type: {mask_type}")
@@ -49,8 +54,11 @@ class ImageMaskFolderAdapter(DatasetAdapter):
         self.mask_dir_name: str = cfg["mask_dir"]
         self.image_exts: Set[str] = {e.lower() for e in cfg.get("image_exts", [".png"])}
         self.mask_exts: Set[str] = {e.lower() for e in cfg.get("mask_exts", [".png"])}
-        self.mask_type: str = cfg.get("mask", {}).get("type", "binary_0_255")
-        self.class_id: int = int(cfg.get("mask", {}).get("class_id", 1))
+        mask_cfg = cfg.get("mask", {})
+        self.mask_type: str = mask_cfg.get("type", "binary_0_255")
+        self.class_id: int = int(mask_cfg.get("class_id", 1))
+        default_threshold = 127 if any(e in {".jpg", ".jpeg"} for e in self.mask_exts) else 0
+        self.mask_threshold: int = int(mask_cfg.get("threshold", default_threshold))
         self.split_dirs: List[str] = list(cfg.get("split_dirs", ["train", "val", "test"]))
         self.sources_cfg: List[dict] = list(cfg.get("sources", []))
 
@@ -141,6 +149,11 @@ class ImageMaskFolderAdapter(DatasetAdapter):
         return {
             "image_id": sid,
             "image": _read_gray_uint8(img_path),
-            "mask": _read_mask(mask_path, self.mask_type, self.class_id),
+            "mask": _read_mask(
+                mask_path,
+                self.mask_type,
+                self.class_id,
+                self.mask_threshold,
+            ),
             "meta": {"img_path": str(img_path), "mask_path": str(mask_path)},
         }

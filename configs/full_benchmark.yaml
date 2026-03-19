@@ -28,17 +28,17 @@ stage1:
 # ─────────────────────────────────────────────────────────────────────────
 datasets:
 
-  # # # 1) Montgomery County X-ray  (138 images)
-  # - name: "Montgomery"
-  #   adapter: "ImageMaskFolderAdapter"
-  #   root: "data/Montgomery"
-  #   image_dir: "img"
-  #   mask_dir: "mask"
-  #   image_exts: [".png"]
-  #   mask_exts: [".png"]
-  #   mask:
-  #     type: "binary_0_255"
-  #     class_id: 1
+  # # 1) Montgomery County X-ray  (138 images)
+  - name: "Montgomery"
+    adapter: "ImageMaskFolderAdapter"
+    root: "data/Montgomery"
+    image_dir: "img"
+    mask_dir: "mask"
+    image_exts: [".png"]
+    mask_exts: [".png"]
+    mask:
+      type: "binary_0_255"
+      class_id: 1
 
   # # 2) BUSI – Breast Ultrasound  (~437 benign+malignant pairs)
   # - name: "BUSI"
@@ -47,13 +47,13 @@ datasets:
   #   categories: ["benign", "malignant"]
   #   image_exts: [".png"]
 
-  # 3) CAMUS – Cardiac Ultrasound  (500 patients × 2 views × 2 phases = ~2000)
-  - name: "CAMUS"
-    adapter: "CAMUSAdapter"
-    root: "data/CAMUS/CAMUS_public/database_nifti"
-    views: ["2CH", "4CH"]
-    phases: ["ED", "ES"]
-    class_id: 1           # LV endocardium (change to 0 for all foreground)
+  # # 3) CAMUS – Cardiac Ultrasound  (500 patients × 2 views × 2 phases = ~2000)
+  # - name: "CAMUS"
+  #   adapter: "CAMUSAdapter"
+  #   root: "data/CAMUS/CAMUS_public/database_nifti"
+  #   views: ["2CH", "4CH"]
+  #   phases: ["ED", "ES"]
+  #   class_id: 1           # LV endocardium (change to 0 for all foreground)
 
   # # 4) TN3K – Thyroid Nodule  (trainval+test merged = 3493 images)
   # - name: "TN3K"
@@ -73,6 +73,7 @@ datasets:
   #   mask:
   #     type: "binary_0_255"
   #     class_id: 1
+  #     threshold: 127
 
   # # 5) TG3K – Thyroid Gland  (3585 images)
   # - name: "TG3K"
@@ -85,6 +86,7 @@ datasets:
   #   mask:
   #     type: "binary_0_255"
   #     class_id: 1
+  #     threshold: 127
 
   # 6) DDTI – Digital Database of Thyroid Imaging  (637 images)
   # - name: "DDTI"
