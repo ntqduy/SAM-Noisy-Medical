@@ -20,6 +20,7 @@ import numpy as np
 import pandas as pd
 import seaborn as sns
 from matplotlib.backends.backend_pdf import PdfPages
+from models.wrappers.prompt_utils import resolve_prompt
 
 
 def _slugify(name: str) -> str:
@@ -287,23 +288,64 @@ class PaperVisualizationSuite:
 
         size = 256
         yy, xx = np.ogrid[:size, :size]
-        cx, cy = size // 2, size // 2
-        r = size // 4
-        bg = np.full((size, size), 65, dtype=np.uint8)
-        fg = ((xx - cx) ** 2 + (yy - cy) ** 2) <= r * r
-        bg[fg] = 150
+        bg = np.full((size, size), 58, dtype=np.uint8)
 
-        modes = [("point", True, False), ("bbox", False, True), ("point+bbox", True, True)]
+        # Synthetic foreground is intentionally off-center to avoid accidental
+        # alignment with image center in prompt visual examples.
+        fg = (
+            ((xx - 100) ** 2) / (52.0**2) + ((yy - 132) ** 2) / (34.0**2) <= 1.0
+        ) | (
+            ((xx - 148) ** 2) / (28.0**2) + ((yy - 110) ** 2) / (24.0**2) <= 1.0
+        )
+        bg[fg] = 156
+        gt_mask = fg.astype(np.uint8)
+
+        modes = [
+            ("point", "prompt_point"),
+            ("bbox", "prompt_bbox"),
+            ("point+bbox", "prompt_point_box"),
+        ]
         fig, axes = plt.subplots(1, 3, figsize=(9.4, 3.2))
 
-        x0, y0, x1, y1 = size // 4, size // 4, (3 * size) // 4, (3 * size) // 4
-        for ax, (label, draw_point, draw_box) in zip(axes, modes):
+        for ax, (label, mode) in zip(axes, modes):
+            resolved = resolve_prompt(
+                {"gt_mask": gt_mask},
+                image_shape=(size, size),
+                prompt_mode=mode,
+            )
             ax.imshow(bg, cmap="gray", vmin=0, vmax=255)
-            if draw_box:
-                rect = plt.Rectangle((x0, y0), x1 - x0, y1 - y0, fill=False, linewidth=2.0, edgecolor="#E67E22")
+
+            bbox = resolved.get("bbox")
+            if bbox is not None:
+                x0, y0, x1, y1 = [int(v) for v in bbox]
+                rect = plt.Rectangle(
+                    (x0, y0),
+                    max(1, x1 - x0 + 1),
+                    max(1, y1 - y0 + 1),
+                    fill=False,
+                    linewidth=2.0,
+                    edgecolor="#E67E22",
+                )
                 ax.add_patch(rect)
-            if draw_point:
-                ax.scatter([cx], [cy], c="#1F77B4", s=28, marker="o", edgecolors="white", linewidths=0.8)
+
+            point = resolved.get("point")
+            if point is None:
+                pts = resolved.get("points")
+                if pts is not None and np.asarray(pts).size >= 2:
+                    p0 = np.asarray(pts).reshape(-1, 2)[0]
+                    point = (int(p0[0]), int(p0[1]))
+            if point is not None:
+                ax.scatter(
+                    [int(point[0])],
+                    [int(point[1])],
+                    c="#1F77B4",
+                    s=30,
+                    marker="o",
+                    edgecolors="white",
+                    linewidths=0.8,
+                    zorder=5,
+                )
+
             ax.set_xticks([])
             ax.set_yticks([])
             ax.set_xlabel(label)
