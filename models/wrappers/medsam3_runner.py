@@ -9,9 +9,11 @@ Default LoRA weight:  ``weights/MedSAM3/best_lora_weights.pt``
 
 from __future__ import annotations
 
+import gc
 import sys
 import os
 import warnings
+from contextlib import nullcontext
 from typing import Any, Dict, Optional
 
 import numpy as np
@@ -46,6 +48,8 @@ class MedSAM3Runner(ModelRunner):
         super().__init__(model_name, normalize_prompt_mode(prompt_mode), device, model_cfg)
         self._model = None       # Sam3Image model
         self._processor = None   # Sam3Processor for set_image
+        self._processor_cls = None
+        self._oom_cpu_fallback_used = False
 
     def load_model(self) -> None:
         try:
@@ -69,14 +73,34 @@ class MedSAM3Runner(ModelRunner):
                 "lora_weights", "weights/MedSAM3/best_lora_weights.pt"
             )
 
-            self._model = build_sam3_image_model(
-                device=self.device,
-                compile=False,
-                checkpoint_path=base_ckpt,
-                load_from_HF=False,
-                enable_inst_interactivity=True,
-                eval_mode=False,
-            )
+            load_device = self.device
+            try:
+                self._model = build_sam3_image_model(
+                    device=load_device,
+                    compile=False,
+                    checkpoint_path=base_ckpt,
+                    load_from_HF=False,
+                    enable_inst_interactivity=True,
+                    eval_mode=False,
+                )
+                self.device = load_device
+            except Exception as e_cuda:
+                if str(load_device).startswith("cuda"):
+                    warnings.warn(
+                        f"MedSAM3 CUDA load failed ({e_cuda}); retrying on CPU.",
+                        RuntimeWarning,
+                    )
+                    self._model = build_sam3_image_model(
+                        device="cpu",
+                        compile=False,
+                        checkpoint_path=base_ckpt,
+                        load_from_HF=False,
+                        enable_inst_interactivity=True,
+                        eval_mode=False,
+                    )
+                    self.device = "cpu"
+                else:
+                    raise
 
             if lora_weights and os.path.isfile(lora_weights):
                 self._apply_lora(lora_weights)
@@ -84,6 +108,7 @@ class MedSAM3Runner(ModelRunner):
             self._model.to(self.device)
             self._model.eval()
 
+            self._processor_cls = Sam3Processor
             self._processor = Sam3Processor(
                 self._model, device=self.device
             )
@@ -95,6 +120,7 @@ class MedSAM3Runner(ModelRunner):
             )
             self._model = None
             self._processor = None
+            self._processor_cls = None
 
     def _apply_lora(self, lora_weights_path: str) -> None:
         """Apply LoRA adapter and load fine-tuned weights."""
@@ -140,12 +166,69 @@ class MedSAM3Runner(ModelRunner):
         img_rgb = np.stack([image] * 3, axis=-1) if image.ndim == 2 else image
         pil_img = PILImage.fromarray(img_rgb.astype(np.uint8))
 
-        with torch.inference_mode():
-            inference_state = self._processor.set_image(pil_img)
-
-            kwargs = build_sam_prompt_kwargs(self.prompt_mode, prompt, batched_box=True)
-
-            masks, iou_predictions, _ = self._model.predict_inst(
-                inference_state, **kwargs
+        amp_context = nullcontext()
+        if self._should_use_amp():
+            amp_context = torch.autocast(
+                device_type="cuda",
+                dtype=self._amp_dtype(torch),
             )
-        return select_best_mask(masks, iou_predictions)
+
+        try:
+            with torch.inference_mode():
+                with amp_context:
+                    inference_state = self._processor.set_image(pil_img)
+
+                    kwargs = build_sam_prompt_kwargs(self.prompt_mode, prompt, batched_box=True)
+
+                    masks, iou_predictions, _ = self._model.predict_inst(
+                        inference_state, **kwargs
+                    )
+            return select_best_mask(masks, iou_predictions)
+        except torch.OutOfMemoryError as e:
+            self._handle_cuda_oom(torch)
+            if self._should_fallback_oom_to_cpu():
+                warnings.warn(
+                    "MedSAM3 CUDA OOM during inference; switching MedSAM3 runner to CPU and retrying.",
+                    RuntimeWarning,
+                )
+                self._switch_to_cpu_processor()
+                return self._run_inference(image, prompt)
+            raise RuntimeError(
+                "MedSAM3 ran out of CUDA memory. Free VRAM or set model_cfg.oom_fallback_to_cpu=true."
+            ) from e
+
+    def _handle_cuda_oom(self, torch_module) -> None:
+        if torch_module.cuda.is_available():
+            torch_module.cuda.empty_cache()
+        gc.collect()
+
+    def _should_use_amp(self) -> bool:
+        return bool(self.model_cfg.get("use_amp", True)) and str(self.device).startswith("cuda")
+
+    def _amp_dtype(self, torch_module):
+        raw = str(self.model_cfg.get("amp_dtype", "float16")).strip().lower()
+        if raw in {"bfloat16", "bf16"}:
+            return torch_module.bfloat16
+        return torch_module.float16
+
+    def _should_fallback_oom_to_cpu(self) -> bool:
+        return (
+            str(self.device).startswith("cuda")
+            and bool(self.model_cfg.get("oom_fallback_to_cpu", True))
+            and not self._oom_cpu_fallback_used
+        )
+
+    def _switch_to_cpu_processor(self) -> None:
+        if self._model is None:
+            return
+        try:
+            self._model.to("cpu")
+        except Exception:
+            pass
+        self.device = "cpu"
+        if self._processor_cls is None:
+            from sam3.model.sam3_image_processor import Sam3Processor
+
+            self._processor_cls = Sam3Processor
+        self._processor = self._processor_cls(self._model, device="cpu")
+        self._oom_cpu_fallback_used = True
