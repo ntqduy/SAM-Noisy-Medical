@@ -21,6 +21,7 @@ Loop structure::
 from __future__ import annotations
 
 import csv
+import gc
 import hashlib
 import os
 import re
@@ -236,25 +237,29 @@ class ExperimentEngine:
                     )
                     raw_csv = csv_dir / raw_name
 
-                    self._run_inner_loop(
-                        runner=runner,
-                        dataset=dataset,
-                        n_samples=n_samples,
-                        noise_cases=noise_cases,
-                        ds_name=ds_name,
-                        mdl_name=mdl_name,
-                        prompt_mode=pm,
-                        raw_csv=raw_csv,
-                        artifact_counts=artifact_counts,
-                    )
+                    try:
+                        self._run_inner_loop(
+                            runner=runner,
+                            dataset=dataset,
+                            n_samples=n_samples,
+                            noise_cases=noise_cases,
+                            ds_name=ds_name,
+                            mdl_name=mdl_name,
+                            prompt_mode=pm,
+                            raw_csv=raw_csv,
+                            artifact_counts=artifact_counts,
+                        )
 
-                    manifest_rows.append({
-                        "dataset": ds_name,
-                        "model": mdl_name,
-                        "runner": runner_name,
-                        "prompt_mode": pm,
-                        "raw_csv": str(raw_csv),
-                    })
+                        manifest_rows.append({
+                            "dataset": ds_name,
+                            "model": mdl_name,
+                            "runner": runner_name,
+                            "prompt_mode": pm,
+                            "raw_csv": str(raw_csv),
+                        })
+                    finally:
+                        self._release_runner(runner)
+                        runner = None
 
         self._write_manifest(manifest_rows)
         return {
@@ -410,6 +415,42 @@ class ExperimentEngine:
         if not raw:
             raw = ["prompt_bbox"]
         return list(dict.fromkeys(normalize_prompt_mode(x) for x in raw))
+
+    def _release_runner(self, runner) -> None:
+        """Best-effort teardown to avoid keeping CUDA memory between model runs."""
+        if runner is None:
+            return
+
+        for attr in ("_model", "_predictor"):
+            obj = getattr(runner, attr, None)
+            if obj is None:
+                continue
+            try:
+                if hasattr(obj, "to"):
+                    obj.to("cpu")
+            except Exception:
+                pass
+            try:
+                setattr(runner, attr, None)
+            except Exception:
+                pass
+
+        if hasattr(runner, "_processor"):
+            try:
+                setattr(runner, "_processor", None)
+            except Exception:
+                pass
+
+        gc.collect()
+        try:
+            import torch
+
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+                if hasattr(torch.cuda, "ipc_collect"):
+                    torch.cuda.ipc_collect()
+        except Exception:
+            pass
 
     # ── noisy-image cache ────────────────────────────────────────────────
 
