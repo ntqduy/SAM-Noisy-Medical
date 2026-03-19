@@ -28,7 +28,7 @@ stage1:
 # ─────────────────────────────────────────────────────────────────────────
 datasets:
 
-  # # 1) Montgomery County X-ray  (138 images)
+  # # # 1) Montgomery County X-ray  (138 images)
   # - name: "Montgomery"
   #   adapter: "ImageMaskFolderAdapter"
   #   root: "data/Montgomery"
@@ -40,20 +40,20 @@ datasets:
   #     type: "binary_0_255"
   #     class_id: 1
 
-  # 2) BUSI – Breast Ultrasound  (~437 benign+malignant pairs)
-  - name: "BUSI"
-    adapter: "BUSIAdapter"
-    root: "data/BUSI/Dataset_BUSI_with_GT"
-    categories: ["benign", "malignant"]
-    image_exts: [".png"]
+  # # 2) BUSI – Breast Ultrasound  (~437 benign+malignant pairs)
+  # - name: "BUSI"
+  #   adapter: "BUSIAdapter"
+  #   root: "data/BUSI/Dataset_BUSI_with_GT"
+  #   categories: ["benign", "malignant"]
+  #   image_exts: [".png"]
 
-  # # 3) CAMUS – Cardiac Ultrasound  (500 patients × 2 views × 2 phases = ~2000)
-  # - name: "CAMUS"
-  #   adapter: "CAMUSAdapter"
-  #   root: "data/CAMUS/CAMUS_public/database_nifti"
-  #   views: ["2CH", "4CH"]
-  #   phases: ["ED", "ES"]
-  #   class_id: 1           # LV endocardium (change to 0 for all foreground)
+  # 3) CAMUS – Cardiac Ultrasound  (500 patients × 2 views × 2 phases = ~2000)
+  - name: "CAMUS"
+    adapter: "CAMUSAdapter"
+    root: "data/CAMUS/CAMUS_public/database_nifti"
+    views: ["2CH", "4CH"]
+    phases: ["ED", "ES"]
+    class_id: 1           # LV endocardium (change to 0 for all foreground)
 
   # # 4) TN3K – Thyroid Nodule  (trainval+test merged = 3493 images)
   # - name: "TN3K"
@@ -86,7 +86,7 @@ datasets:
   #     type: "binary_0_255"
   #     class_id: 1
 
-  # # 6) DDTI – Digital Database of Thyroid Imaging  (637 images)
+  # 6) DDTI – Digital Database of Thyroid Imaging  (637 images)
   # - name: "DDTI"
   #   adapter: "ImageMaskFolderAdapter"
   #   root: "data/Thyroid Dataset/Thyroid Dataset/DDTI dataset/DDTI/1_or_data"
@@ -119,33 +119,33 @@ models:
     checkpoint: "weights/sam3.pt"
     prompt_modes: ["prompt_point", "prompt_bbox", "prompt_point_box"]
 
-  # - name: "MedSAM"
-  #   runner: "MEDSAM1"
-  #   checkpoint: "weights/medsam_vit_b.pth"
-  #   point_logit_threshold: -1.2
-  #   # Original MedSAM is box-prompt native in this benchmark.
-  #   prompt_modes: ["prompt_point", "prompt_bbox", "prompt_point_box"]
+  - name: "MedSAM"
+    runner: "MEDSAM1"
+    checkpoint: "weights/medsam_vit_b.pth"
+    point_logit_threshold: -1.2
+    # Original MedSAM is box-prompt native in this benchmark.
+    prompt_modes: ["prompt_point", "prompt_bbox", "prompt_point_box"]
 
-  # # MedSAM2 – MedSAM built on SAM2 backbone
-  # - name: "MedSAM2"
-  #   runner: "MEDSAM2"
-  #   checkpoint: "weights/MedSAM2/MedSAM2_latest.pt"
-  #   config: "sam2.1_hiera_t512.yaml"
-  #   prompt_modes: ["prompt_point", "prompt_bbox", "prompt_point_box"]
+  # MedSAM2 – MedSAM built on SAM2 backbone
+  - name: "MedSAM2"
+    runner: "MEDSAM2"
+    checkpoint: "weights/MedSAM2/MedSAM2_latest.pt"
+    config: "sam2.1_hiera_t512.yaml"
+    prompt_modes: ["prompt_point", "prompt_bbox", "prompt_point_box"]
 
-  # # MedSAM3 – LoRA fine-tuned on SAM3 base
-  # # Note: Uses SAM3 base weights (weights/sam3.pt) + LoRA adapter
-  # - name: "MedSAM3"
-  #   runner: "MEDSAM3"
-  #   checkpoint: "weights/sam3.pt"
-  #   lora_weights: "weights/MedSAM3/best_lora_weights.pt"
-  #   prompt_modes: ["prompt_point", "prompt_bbox", "prompt_point_box"]
+  # MedSAM3 – LoRA fine-tuned on SAM3 base
+  # Note: Uses SAM3 base weights (weights/sam3.pt) + LoRA adapter
+  - name: "MedSAM3"
+    runner: "MEDSAM3"
+    checkpoint: "weights/sam3.pt"
+    lora_weights: "weights/MedSAM3/best_lora_weights.pt"
+    prompt_modes: ["prompt_point", "prompt_bbox", "prompt_point_box"]
 
-  # # SAM-Med2D – SAM fine-tuned on large-scale medical 2D dataset
-  # - name: "SAM-Med2D"
-  #   runner: "SAM-MED2D"
-  #   checkpoint: "weights/sam-med2d_b.pth"
-  #   prompt_modes: ["prompt_point", "prompt_bbox", "prompt_point_box"]
+  # SAM-Med2D – SAM fine-tuned on large-scale medical 2D dataset
+  - name: "SAM-Med2D"
+    runner: "SAM-MED2D"
+    checkpoint: "weights/sam-med2d_b.pth"
+    prompt_modes: ["prompt_point", "prompt_bbox", "prompt_point_box"]
 
   # - name: "UltraSAM"
   #   runner: "ULTRASAM"
