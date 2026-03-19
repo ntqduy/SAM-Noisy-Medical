@@ -146,12 +146,12 @@ models:
     checkpoint: "weights/sam-med2d_b.pth"
     prompt_modes: ["prompt_point", "prompt_bbox", "prompt_point_box"]
 
-  - name: "UltraSAM"
-    runner: "ULTRASAM"
-    checkpoint: "weights/UltraSam.pth"
-    prompt_modes: ["prompt_point","prompt_bbox","prompt_point_box"]
-    config: "models/external/UltraSam/configs/UltraSAM/UltraSAM_full/UltraSAM_box_no_refine.py"
-    force_box_for_point: true
+  # - name: "UltraSAM"
+  #   runner: "ULTRASAM"
+  #   checkpoint: "weights/UltraSam.pth"
+  #   prompt_modes: ["prompt_point","prompt_bbox","prompt_point_box"]
+  #   config: "models/external/UltraSam/configs/UltraSAM/UltraSAM_full/UltraSAM_box_no_refine.py"
+  #   force_box_for_point: true
 
 # ─────────────────────────────────────────────────────────────────────────
 #  NOISE TYPES & LEVELS
