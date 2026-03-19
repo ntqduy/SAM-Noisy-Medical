@@ -219,12 +219,13 @@ def resolve_prompt(
     mode = normalize_prompt_mode(prompt_mode) if prompt_mode is not None else None
 
     # Unified benchmark setup:
-    # - prompt_point: exactly one centroid point, no negative click
+    # - prompt_point: default one positive click (can be overridden via n_fg_points)
     # - prompt_bbox: GT box with fixed margin
-    # - prompt_point_box: exactly one centroid point + one GT box
+    # - prompt_point_box: exactly one positive click + one GT box
     m_bool = np.asarray(prompt["gt_mask"]).astype(bool) if prompt.get("gt_mask") is not None else None
     single_point_default = mode in ("prompt_point", "prompt_point_box")
     single_point = bool(prompt.get("single_point", single_point_default))
+    requested_points = int(max(1, prompt.get("n_fg_points", 1 if single_point else 3)))
     bbox_margin_px = int(max(0, prompt.get("bbox_margin_px", 8)))
 
     user_point = prompt.get("point")
@@ -263,12 +264,14 @@ def resolve_prompt(
     if gt_mask is not None and np.asarray(gt_mask).astype(bool).any():
         fg_coords = _foreground_coords(gt_mask)
         if fg_coords.shape[0] > 0:
-            centroid = mask_centroid(gt_mask, fg_coords=fg_coords)
-            if centroid is not None:
-                cx, cy = centroid
-                points_arr = np.asarray([[int(cx), int(cy)]], dtype=np.int32)
-                labels_arr = np.ones((1,), dtype=np.int32)
-                point = (int(cx), int(cy))
+            # For disconnected objects (e.g., left/right lungs), arithmetic centroid
+            # can lie on background. Use guaranteed foreground points instead.
+            n_points = 1 if single_point else requested_points
+            fg_points = mask_to_points(gt_mask, k=n_points, fg_coords=fg_coords)
+            if fg_points.shape[0] > 0:
+                points_arr = fg_points.astype(np.int32)
+                labels_arr = np.ones((points_arr.shape[0],), dtype=np.int32)
+                point = (int(points_arr[0, 0]), int(points_arr[0, 1]))
         if bbox is None:
             bbox = _clip_bbox(
                 mask_to_bbox(
@@ -293,12 +296,14 @@ def resolve_prompt(
 
     # Enforce strict prompt-mode separation to avoid leakage across modes.
     if mode == "prompt_point":
-        # Point-only: keep exactly one centroid point.
+        # Point-only: default one click, unless caller explicitly requests multi-point.
         bbox = None
-        if points_arr is not None and points_arr.shape[0] > 0:
+        if requested_points <= 1 and points_arr is not None and points_arr.shape[0] > 0:
             points_arr = points_arr[:1]
             labels_arr = np.ones((1,), dtype=np.int32)
-        single_point = True
+            single_point = True
+        else:
+            single_point = False
     elif mode == "prompt_multi_point":
         bbox = None
         single_point = False
