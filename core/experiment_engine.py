@@ -314,12 +314,6 @@ class ExperimentEngine:
                             "gt_mask": gt_mask,
                             "noise_seed": case.noise_seed,
                             "noise_level": case.noise_level,
-                            # Montgomery lungs are disconnected (left/right), so use two positive points.
-                            **(
-                                {"n_fg_points": 2, "single_point": False}
-                                if str(ds_name).strip().lower() == "montgomery" and prompt_mode == "prompt_point"
-                                else {}
-                            ),
                         },
                         image.shape[:2],
                         prompt_mode=prompt_mode,

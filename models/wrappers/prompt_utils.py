@@ -128,6 +128,54 @@ def mask_to_points(
     return _farthest_point_sampling(coords, k)
 
 
+def _component_representative_points(
+    mask: np.ndarray,
+    max_points: Optional[int] = None,
+) -> np.ndarray:
+    """
+    Return one deterministic foreground point per connected component.
+
+    The point for each component is chosen as the foreground pixel nearest to the
+    component centroid, ensuring:
+    - 1 object -> 1 point
+    - 2 disconnected objects -> 2 points
+    """
+    m = (np.asarray(mask) > 0).astype(np.uint8)
+    if m.ndim > 2:
+        m = np.squeeze(m)
+    if not m.any():
+        return np.empty((0, 2), dtype=np.int32)
+
+    try:
+        import cv2
+
+        n_labels, labels, _, _ = cv2.connectedComponentsWithStats(m, connectivity=8)
+    except Exception:
+        # Fallback: keep previous behavior if cv2 is unavailable.
+        fg = _foreground_coords(m)
+        return mask_to_points(m, k=1, fg_coords=fg)
+
+    pts = []
+    for lab in range(1, int(n_labels)):
+        ys, xs = np.where(labels == lab)
+        if xs.size == 0:
+            continue
+        cx = float(xs.mean())
+        cy = float(ys.mean())
+        d2 = (xs.astype(np.float32) - cx) ** 2 + (ys.astype(np.float32) - cy) ** 2
+        idx = int(np.argmin(d2))
+        pts.append((int(xs[idx]), int(ys[idx])))
+
+    if not pts:
+        return np.empty((0, 2), dtype=np.int32)
+
+    out = np.asarray(pts, dtype=np.int32)
+    if max_points is not None:
+        k = int(max(1, max_points))
+        out = out[:k]
+    return out
+
+
 def build_prompt(
     gt_mask: Optional[np.ndarray],
     image_shape: Tuple[int, int],
@@ -222,10 +270,11 @@ def resolve_prompt(
     # - prompt_point: default one positive click (can be overridden via n_fg_points)
     # - prompt_bbox: GT box with fixed margin
     # - prompt_point_box: exactly one positive click + one GT box
-    m_bool = np.asarray(prompt["gt_mask"]).astype(bool) if prompt.get("gt_mask") is not None else None
     single_point_default = mode in ("prompt_point", "prompt_point_box")
     single_point = bool(prompt.get("single_point", single_point_default))
     requested_points = int(max(1, prompt.get("n_fg_points", 1 if single_point else 3)))
+    auto_points_by_components = bool(prompt.get("auto_points_by_components", True))
+    max_auto_fg_points = int(max(1, prompt.get("max_auto_fg_points", 2)))
     bbox_margin_px = int(max(0, prompt.get("bbox_margin_px", 8)))
 
     user_point = prompt.get("point")
@@ -264,10 +313,20 @@ def resolve_prompt(
     if gt_mask is not None and np.asarray(gt_mask).astype(bool).any():
         fg_coords = _foreground_coords(gt_mask)
         if fg_coords.shape[0] > 0:
-            # For disconnected objects (e.g., left/right lungs), arithmetic centroid
-            # can lie on background. Use guaranteed foreground points instead.
-            n_points = 1 if single_point else requested_points
-            fg_points = mask_to_points(gt_mask, k=n_points, fg_coords=fg_coords)
+            if mode == "prompt_point" and auto_points_by_components:
+                # Fair point policy for benchmark: 1 connected object -> 1 point,
+                # 2 connected objects -> 2 points (capped by max_auto_fg_points).
+                fg_points = _component_representative_points(
+                    gt_mask, max_points=max_auto_fg_points
+                )
+                if fg_points.shape[0] > 0:
+                    requested_points = int(fg_points.shape[0])
+                    single_point = requested_points <= 1
+            else:
+                # For disconnected objects (e.g., left/right lungs), arithmetic centroid
+                # can lie on background. Use guaranteed foreground points instead.
+                n_points = 1 if single_point else requested_points
+                fg_points = mask_to_points(gt_mask, k=n_points, fg_coords=fg_coords)
             if fg_points.shape[0] > 0:
                 points_arr = fg_points.astype(np.int32)
                 labels_arr = np.ones((points_arr.shape[0],), dtype=np.int32)

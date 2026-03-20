@@ -60,7 +60,7 @@ models:
 
   - name: "MedSAM"
     runner: "MEDSAM1"
-    prompt_modes: ["prompt_bbox", "prompt_point_box"]
+    prompt_modes: ["prompt_point", "prompt_bbox", "prompt_point_box"]
 
 noises:
   - gaussian

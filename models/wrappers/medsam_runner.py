@@ -206,7 +206,11 @@ class MedSAMRunner(ModelRunner):
             # Use logits with a lower threshold and keep the component around the click.
             masks, scores, logits = self._predictor.predict(return_logits=True, **kwargs)
             logit_thresh = float(self.model_cfg.get("point_logit_threshold", -1.2))
-            point_xy = prompt.get("point")
+            point_arr = prompt.get("points")
+            if point_arr is None and prompt.get("point") is not None:
+                point_arr = np.asarray([prompt["point"]], dtype=np.float32)
+            elif point_arr is not None:
+                point_arr = np.asarray(point_arr, dtype=np.float32).reshape(-1, 2)
 
             logits_arr = np.asarray(logits)
             if logits_arr.ndim == 2:
@@ -217,16 +221,21 @@ class MedSAMRunner(ModelRunner):
             for lo in logits_arr:
                 bin_mask = (lo > logit_thresh).astype(np.uint8)
 
-                if point_xy is not None:
-                    px = int(round(float(point_xy[0]) * scale))
-                    py = int(round(float(point_xy[1]) * scale))
-                    px = int(np.clip(px, 0, bin_mask.shape[1] - 1))
-                    py = int(np.clip(py, 0, bin_mask.shape[0] - 1))
+                if point_arr is not None and point_arr.shape[0] > 0:
                     num_labels, labels, _, _ = cv2.connectedComponentsWithStats(bin_mask, 8)
                     if num_labels > 1:
-                        click_label = int(labels[py, px])
-                        if click_label > 0:
-                            bin_mask = (labels == click_label).astype(np.uint8)
+                        keep_labels = set()
+                        for point_xy in point_arr:
+                            px = int(round(float(point_xy[0]) * scale))
+                            py = int(round(float(point_xy[1]) * scale))
+                            px = int(np.clip(px, 0, bin_mask.shape[1] - 1))
+                            py = int(np.clip(py, 0, bin_mask.shape[0] - 1))
+                            click_label = int(labels[py, px])
+                            if click_label > 0:
+                                keep_labels.add(click_label)
+                        if keep_labels:
+                            keep_mask = np.isin(labels, list(keep_labels))
+                            bin_mask = keep_mask.astype(np.uint8)
 
                 area = int(bin_mask.sum())
                 if area > best_area:

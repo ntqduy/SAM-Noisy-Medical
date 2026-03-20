@@ -210,35 +210,62 @@ class UltraSAMRunner(ModelRunner):
 
     def _run_mmdet_prompt_native(self, img_rgb: np.ndarray, prompt: dict) -> np.ndarray:
         if self.prompt_mode == "prompt_point":
-            # Many UltraSAM checkpoints (e.g., box_refine) are trained for box prompts.
-            # Default: route point mode through box variant to avoid embed-dim mismatch.
-            if bool(self.model_cfg.get("force_box_for_point", True)):
-                warnings.warn(
-                    "UltraSAM point mode routed through box prompt to avoid embedding mismatch; "
-                    "set force_box_for_point=false with a point-compatible config+checkpoint if available.",
-                    RuntimeWarning,
-                )
-                return self._predict_mmdet_single_prompt(img_rgb, prompt, prompt_variant="box")
-            return self._predict_mmdet_single_prompt(img_rgb, prompt, prompt_variant="point")
+            # Keep behavior aligned with other SAM wrappers: try native point first.
+            # If user's checkpoint/config cannot run point branch, optionally fall
+            # back to box when force_box_for_point=true.
+            try:
+                return self._predict_mmdet_single_prompt(img_rgb, prompt, prompt_variant="point")
+            except Exception as e:
+                if bool(self.model_cfg.get("force_box_for_point", False)):
+                    warnings.warn(
+                        "UltraSAM point branch failed; falling back to box branch because "
+                        "force_box_for_point=true. "
+                        f"Root error: {type(e).__name__}: {e}",
+                        RuntimeWarning,
+                    )
+                    return self._predict_mmdet_single_prompt(img_rgb, prompt, prompt_variant="box")
+                raise
         if self.prompt_mode == "prompt_bbox":
             return self._predict_mmdet_single_prompt(img_rgb, prompt, prompt_variant="box")
         if self.prompt_mode == "prompt_point_box":
-            box_mask = self._predict_mmdet_single_prompt(img_rgb, prompt, prompt_variant="box")
+            box_mask, box_score = self._predict_mmdet_single_prompt(
+                img_rgb, prompt, prompt_variant="box", return_score=True
+            )
             try:
-                point_mask = self._predict_mmdet_single_prompt(img_rgb, prompt, prompt_variant="point")
-            except Exception as e:
-                warnings.warn(
-                    "UltraSAM point+box fusion failed on point branch; "
-                    f"falling back to box branch only. Root error: {type(e).__name__}: {e}",
-                    RuntimeWarning,
+                point_mask, point_score = self._predict_mmdet_single_prompt(
+                    img_rgb, prompt, prompt_variant="point", return_score=True
                 )
+            except Exception as e:
+                if bool(self.model_cfg.get("force_box_for_point", False)):
+                    warnings.warn(
+                        "UltraSAM point+box point branch failed; falling back to box branch "
+                        "because force_box_for_point=true. "
+                        f"Root error: {type(e).__name__}: {e}",
+                        RuntimeWarning,
+                    )
+                    return box_mask
+                raise
+
+            fusion_mode = str(self.model_cfg.get("point_box_fusion", "best_score")).strip().lower()
+            if fusion_mode in {"best", "best_score", "score"}:
+                return point_mask if float(point_score) >= float(box_score) else box_mask
+            if fusion_mode in {"intersection", "inter"}:
+                inter = ((point_mask > 0) & (box_mask > 0)).astype(np.uint8)
+                if int(inter.sum()) > 0:
+                    return inter
+                return box_mask
+            if fusion_mode == "union":
+                return ((point_mask > 0) | (box_mask > 0)).astype(np.uint8)
+            if fusion_mode in {"point", "point_only"}:
+                return point_mask
+            if fusion_mode in {"box", "box_only"}:
                 return box_mask
 
-            inter = ((point_mask > 0) & (box_mask > 0)).astype(np.uint8)
-            if int(inter.sum()) > 0:
-                return inter
-            union = ((point_mask > 0) | (box_mask > 0)).astype(np.uint8)
-            return union
+            warnings.warn(
+                f"Unknown UltraSAM point_box_fusion='{fusion_mode}', using best_score.",
+                RuntimeWarning,
+            )
+            return point_mask if float(point_score) >= float(box_score) else box_mask
 
         raise ValueError(
             "Unsupported UltraSAM prompt mode for MMDet backend: "
@@ -251,7 +278,8 @@ class UltraSAMRunner(ModelRunner):
         prompt: dict,
         *,
         prompt_variant: str,
-    ) -> np.ndarray:
+        return_score: bool = False,
+    ):
         import torch
         from mmengine.structures import InstanceData
         from mmdet.structures import DetDataSample
@@ -280,28 +308,54 @@ class UltraSAMRunner(ModelRunner):
         y0 = int(np.clip(y0, 0, src_h - 1))
         y1 = int(np.clip(y1, 0, src_h - 1))
 
-        pt = prompt.get("point")
-        if pt is None:
-            pt = ((x0 + x1) // 2, (y0 + y1) // 2)
-        px, py = int(pt[0]), int(pt[1])
-        px = int(np.clip(px, 0, src_w - 1))
-        py = int(np.clip(py, 0, src_h - 1))
+        # Build point instances.
+        point_instances = []
+        if prompt_variant == "point":
+            pts = prompt.get("points")
+            if pts is not None:
+                arr = np.asarray(pts, dtype=np.int32).reshape(-1, 2)
+                for pxy in arr:
+                    px = int(np.clip(int(pxy[0]), 0, src_w - 1))
+                    py = int(np.clip(int(pxy[1]), 0, src_h - 1))
+                    point_instances.append((px, py))
+
+        if not point_instances:
+            pt = prompt.get("point")
+            if pt is None:
+                pt = ((x0 + x1) // 2, (y0 + y1) // 2)
+            px, py = int(pt[0]), int(pt[1])
+            px = int(np.clip(px, 0, src_w - 1))
+            py = int(np.clip(py, 0, src_h - 1))
+            point_instances = [(px, py)]
+
+        n_instances = len(point_instances)
+        point_coords_np = np.asarray(
+            [[[px * sx + 0.5, py * sy + 0.5]] for (px, py) in point_instances],
+            dtype=np.float32,
+        )
+        box_pair = np.asarray(
+            [[x0 * sx + 0.5, y0 * sy + 0.5], [x1 * sx + 0.5, y1 * sy + 0.5]],
+            dtype=np.float32,
+        )
+        box_coords_np = np.repeat(box_pair[None, :, :], n_instances, axis=0)
+        flat_bbox_np = np.repeat(
+            np.asarray([[x0 * sx, y0 * sy, x1 * sx, y1 * sy]], dtype=np.float32),
+            n_instances,
+            axis=0,
+        )
 
         # Prompt coordinates follow UltraSAM test transform convention (+0.5 offset).
-        point_coords = torch.tensor([[[px * sx + 0.5, py * sy + 0.5]]], dtype=torch.float32)
-        box_coords = torch.tensor(
-            [[[x0 * sx + 0.5, y0 * sy + 0.5], [x1 * sx + 0.5, y1 * sy + 0.5]]],
-            dtype=torch.float32,
-        )
-        flat_bbox = torch.tensor([[x0 * sx, y0 * sy, x1 * sx, y1 * sy]], dtype=torch.float32)
+        point_coords = torch.from_numpy(point_coords_np)
+        box_coords = torch.from_numpy(box_coords_np)
+        flat_bbox = torch.from_numpy(flat_bbox_np)
 
         prompt_type_value = 0 if prompt_variant == "point" else 1
         gt_instances = InstanceData(
             points=point_coords,
             boxes=box_coords,
             bboxes=flat_bbox,
-            labels=torch.zeros((1,), dtype=torch.long),
-            prompt_types=torch.full((1,), prompt_type_value, dtype=torch.long),
+            labels=torch.zeros((n_instances,), dtype=torch.long),
+            prompt_types=torch.full((n_instances,), prompt_type_value, dtype=torch.long),
         )
 
         data_sample = DetDataSample()
@@ -330,11 +384,13 @@ class UltraSAMRunner(ModelRunner):
             ) from e
 
         if not pred_samples:
-            return np.zeros((src_h, src_w), dtype=np.uint8)
+            empty = np.zeros((src_h, src_w), dtype=np.uint8)
+            return (empty, 0.0) if return_score else empty
 
         pred_instances = pred_samples[0].pred_instances
         if pred_instances is None or len(pred_instances) == 0 or not hasattr(pred_instances, "masks"):
-            return np.zeros((src_h, src_w), dtype=np.uint8)
+            empty = np.zeros((src_h, src_w), dtype=np.uint8)
+            return (empty, 0.0) if return_score else empty
 
         masks = pred_instances.masks
         if isinstance(masks, torch.Tensor):
@@ -342,14 +398,26 @@ class UltraSAMRunner(ModelRunner):
         else:
             masks_np = np.asarray(masks)
 
+        pred_score = 0.0
         if masks_np.ndim == 2:
             mask = (masks_np > 0).astype(np.uint8)
+            if hasattr(pred_instances, "scores") and len(pred_instances.scores) > 0:
+                pred_score = float(pred_instances.scores[0].detach().cpu().item())
         else:
-            idx = 0
-            if hasattr(pred_instances, "scores") and len(pred_instances.scores) == masks_np.shape[0]:
-                idx = int(torch.argmax(pred_instances.scores).item())
-            mask = (masks_np[idx] > 0).astype(np.uint8)
+            if prompt_variant == "point" and n_instances > 1:
+                # Multi-point policy for disconnected objects: keep union across
+                # point-instance predictions.
+                mask = (masks_np > 0).any(axis=0).astype(np.uint8)
+                if hasattr(pred_instances, "scores") and len(pred_instances.scores) == masks_np.shape[0]:
+                    pred_score = float(torch.max(pred_instances.scores).detach().cpu().item())
+            else:
+                idx = 0
+                if hasattr(pred_instances, "scores") and len(pred_instances.scores) == masks_np.shape[0]:
+                    idx = int(torch.argmax(pred_instances.scores).item())
+                    pred_score = float(pred_instances.scores[idx].detach().cpu().item())
+                mask = (masks_np[idx] > 0).astype(np.uint8)
 
         if mask.shape[:2] != (src_h, src_w):
             mask = cv2.resize(mask.astype(np.uint8), (src_w, src_h), interpolation=cv2.INTER_NEAREST)
-        return (mask > 0).astype(np.uint8)
+        out = (mask > 0).astype(np.uint8)
+        return (out, pred_score) if return_score else out
