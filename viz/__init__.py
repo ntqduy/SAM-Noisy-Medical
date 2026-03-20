@@ -1,6 +1,13 @@
-"""Step-2 visualization – OOP classes and backwards-compat free functions."""
+"""Step-2 visualization - OOP classes and backward-compatible free functions."""
 
-# ── default level descriptors ────────────────────────────────────────────
+import os
+
+# Notebook inline backends can fail in non-notebook/headless runs.
+_mpl_backend = os.environ.get("MPLBACKEND", "").strip().lower()
+if _mpl_backend.startswith("module://"):
+    os.environ["MPLBACKEND"] = "Agg"
+
+# default level descriptors
 DEFAULT_LEVEL_NAMES = {
     "L0": "clean",
     "L1": "very mild",

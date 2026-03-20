@@ -132,6 +132,13 @@ def _run_stage1b(cfg: Dict[str, Any], exp_dir: Path):
 
 
 def _run_stage2(cfg: Dict[str, Any], exp_dir: Path):
+    import os
+
+    backend_env = os.environ.get("MPLBACKEND", "").strip().lower()
+    # In headless/script mode, inline backends from notebooks can be invalid.
+    if not backend_env or backend_env.startswith("module://"):
+        os.environ["MPLBACKEND"] = "Agg"
+
     from viz import PaperVisualizationSuite
 
     merged_csv = exp_dir / "statistics_merged.csv"
