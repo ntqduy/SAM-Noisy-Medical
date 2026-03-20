@@ -41,6 +41,7 @@ class UltraSAMRunner(ModelRunner):
         self._mode_warning_emitted = False
 
     def load_model(self) -> None:
+        attempted_backend = "unknown"
         try:
             UltraSamPredictor = None
             try:
@@ -49,6 +50,7 @@ class UltraSAMRunner(ModelRunner):
                 UltraSamPredictor = None
 
             if UltraSamPredictor is None:
+                attempted_backend = "mmdet"
                 # Try bundled UltraSam source tree first.
                 ultrasam_root = os.path.abspath(
                     os.path.join(os.path.dirname(__file__), os.pardir, "external", "UltraSam")
@@ -125,6 +127,7 @@ class UltraSAMRunner(ModelRunner):
                 return
 
             else:
+                attempted_backend = "predictor"
                 ckpt = self.model_cfg.get("checkpoint", "weights/UltraSam.pth")
                 self._model = UltraSamPredictor(checkpoint=ckpt, device=self.device)
                 self._backend = "predictor"
@@ -137,14 +140,14 @@ class UltraSAMRunner(ModelRunner):
                 "mim install mmdet mmpretrain"
             )
             err_msg = f"{type(e).__name__}: {e!r}"
-            tb_last = traceback.format_exc(limit=1).strip().splitlines()[-1] if True else ""
+            tb_tail = traceback.format_exc(limit=6).strip()
             warnings.warn(
-                "UltraSAM load failed. The current wrapper expects a Python module "
-                "`ultrasam` exposing `UltraSamPredictor`, but this module is not present "
-                "in the provided env/repo. If you want true UltraSAM inference, install the "
-                "matching predictor package used by this wrapper or implement an MMDetection-"
-                f"based adapter for `models/external/UltraSam`. {install_hint}. "
-                f"Root error: {err_msg}. Trace: {tb_last}",
+                "UltraSAM load failed while initializing backend="
+                f"{attempted_backend}. If backend=mmdet, ensure OpenMMLab deps are installed "
+                "(mmengine/mmcv/mmdet/mmpretrain) and the UltraSAM config is compatible. "
+                "If backend=predictor, ensure a Python package `ultrasam` exposing "
+                "`UltraSamPredictor` is available. "
+                f"{install_hint}. Root error: {err_msg}. Trace tail: {tb_tail}",
                 RuntimeWarning,
             )
             self._model = None

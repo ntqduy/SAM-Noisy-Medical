@@ -28,9 +28,17 @@ test_dataloader = dict(
 )
 
 orig_val_evaluator = _base_.val_evaluator
-orig_val_evaluator[0]['ann_file'] = '{}/test.agnostic.noSmall.coco.json'.format(data_root)
+if isinstance(orig_val_evaluator, list):
+    for _ev in orig_val_evaluator:
+        _ev['ann_file'] = '{}/test.agnostic.noSmall.coco.json'.format(data_root)
+else:
+    orig_val_evaluator['ann_file'] = '{}/test.agnostic.noSmall.coco.json'.format(data_root)
 val_evaluator = orig_val_evaluator
 
 orig_test_evaluator = _base_.test_evaluator
-orig_test_evaluator[0]['ann_file'] = '{}/test.agnostic.noSmall.coco.json'.format(data_root)
+if isinstance(orig_test_evaluator, list):
+    for _ev in orig_test_evaluator:
+        _ev['ann_file'] = '{}/test.agnostic.noSmall.coco.json'.format(data_root)
+else:
+    orig_test_evaluator['ann_file'] = '{}/test.agnostic.noSmall.coco.json'.format(data_root)
 test_evaluator = orig_test_evaluator
