@@ -7,10 +7,32 @@ import cv2
 from noises.base import NoiseBase
 
 
+def _to_gray_uint8(x: np.ndarray) -> np.ndarray:
+    """Convert input image to 2D uint8 grayscale."""
+    arr = np.asarray(x)
+    if arr.ndim == 2:
+        gray = arr
+    elif arr.ndim == 3:
+        gray = np.mean(arr, axis=2)
+    else:
+        gray = np.squeeze(arr)
+    if gray.dtype != np.uint8:
+        gray = np.clip(gray, 0, 255).astype(np.uint8)
+    return gray
+
+
+def _restore_like_input(gray: np.ndarray, ref: np.ndarray) -> np.ndarray:
+    """Match output channel layout to input (HxW or HxWxC)."""
+    if np.asarray(ref).ndim == 3:
+        channels = int(np.asarray(ref).shape[2])
+        return np.repeat(gray[..., None], channels, axis=2).astype(np.uint8)
+    return gray.astype(np.uint8)
+
+
 class SpeckleNoise(NoiseBase):
     """Multiplicative speckle noise (common in ultrasound/radar)."""
     
-    PARAM_RANGES = {"sigma": (0.0, 0.3)}
+    PARAM_RANGES = {"sigma": (0.0, 0.9)}
     
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -42,7 +64,7 @@ class UniformNoise(NoiseBase):
 class JPEGArtifacts(NoiseBase):
     """JPEG compression artifacts."""
     
-    PARAM_RANGES = {"quality": (10, 95)}
+    PARAM_RANGES = {"quality": (5, 95)}
     
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -57,14 +79,91 @@ class JPEGArtifacts(NoiseBase):
     
     def apply(self, x: np.ndarray) -> np.ndarray:
         quality = int(self.params.get("quality", 40))
-        rgb = cv2.cvtColor(x, cv2.COLOR_GRAY2BGR)
+        gray = _to_gray_uint8(x)
+        rgb = cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR)
         encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), max(1, min(95, quality))]
         ok, enc = cv2.imencode(".jpg", rgb, encode_param)
         if not ok:
             return x
         dec = cv2.imdecode(enc, cv2.IMREAD_COLOR)
-        gray = cv2.cvtColor(dec, cv2.COLOR_BGR2GRAY)
-        return gray.astype(np.uint8)
+        out_gray = cv2.cvtColor(dec, cv2.COLOR_BGR2GRAY).astype(np.uint8)
+        return _restore_like_input(out_gray, x)
+
+
+class PixelationNoise(NoiseBase):
+    """Pixelation / blocky downsample-upsample artifacts."""
+
+    PARAM_RANGES = {"block_size": (1, 50)}
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self._noise_type = "pixelation"
+
+    def apply(self, x: np.ndarray) -> np.ndarray:
+        block_size = int(self.params.get("block_size", 8))
+        block_size = max(1, block_size)
+        gray = _to_gray_uint8(x)
+        h, w = gray.shape[:2]
+        small_w = max(1, w // block_size)
+        small_h = max(1, h // block_size)
+        small = cv2.resize(gray, (small_w, small_h), interpolation=cv2.INTER_NEAREST)
+        restored = cv2.resize(small, (w, h), interpolation=cv2.INTER_NEAREST)
+        return _restore_like_input(restored.astype(np.uint8), x)
+
+
+class LowBrightnessNoise(NoiseBase):
+    """Darken image globally by multiplicative factor (<1)."""
+
+    PARAM_RANGES = {"factor": (0.05, 1.0)}
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self._noise_type = "low_brightness"
+
+    def get_severity_scalar(self) -> float:
+        factor = float(self.params.get("factor", 0.75))
+        min_f, max_f = self.PARAM_RANGES["factor"]
+        normalized = 1.0 - (factor - min_f) / (max_f - min_f)
+        return float(np.clip(normalized, 0.0, 1.0))
+
+    def apply(self, x: np.ndarray) -> np.ndarray:
+        factor = float(self.params.get("factor", 0.75))
+        gray = _to_gray_uint8(x).astype(np.float32)
+        out = np.clip(gray * factor, 0, 255).astype(np.uint8)
+        return _restore_like_input(out, x)
+
+
+class HighBrightnessNoise(NoiseBase):
+    """Brighten image globally by multiplicative factor (>1)."""
+
+    PARAM_RANGES = {"factor": (1.0, 5.0)}
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self._noise_type = "high_brightness"
+
+    def apply(self, x: np.ndarray) -> np.ndarray:
+        factor = float(self.params.get("factor", 1.25))
+        gray = _to_gray_uint8(x).astype(np.float32)
+        out = np.clip(gray * factor, 0, 255).astype(np.uint8)
+        return _restore_like_input(out, x)
+
+
+class HighContrastNoise(NoiseBase):
+    """Increase contrast around mid-gray pivot 128."""
+
+    PARAM_RANGES = {"factor": (1.0, 8.0)}
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self._noise_type = "high_contrast"
+
+    def apply(self, x: np.ndarray) -> np.ndarray:
+        factor = float(self.params.get("factor", 1.4))
+        gray = _to_gray_uint8(x).astype(np.float32)
+        out = (gray - 128.0) * factor + 128.0
+        out = np.clip(out, 0, 255).astype(np.uint8)
+        return _restore_like_input(out, x)
 
 
 class QuantizationNoise(NoiseBase):

@@ -7,11 +7,11 @@ class SaltPepperNoise(NoiseBase):
     Salt and pepper noise (impulse noise).
     
     Parameters:
-        amount: Fraction of pixels affected (0.0 - 0.1 typical)
+        amount: Fraction of pixels affected (supports heavy setups up to 0.5)
     """
     
     PARAM_RANGES = {
-        "amount": (0.0, 0.1),  # Fraction of pixels
+        "amount": (0.0, 0.5),  # Match stronger level schedules
     }
     
     def __init__(self, **kwargs):

@@ -78,6 +78,8 @@ Defined in config (`noises`, `levels`, `protocols.coupled_presets`) and executed
 - Non-`L0` params are taken from `protocols.coupled_presets[noise_type][level]`
 - Deterministic seed key uses:
   - `base_seed`, `noise_seed`, `dataset_name`, `image_id`, `noise_type`, `level`
+- Built-in optional extras now include:
+  - `jpeg`, `pixelation`, `low_brightness`, `high_brightness`, `high_contrast`, `speckle`
 
 ## Installation
 

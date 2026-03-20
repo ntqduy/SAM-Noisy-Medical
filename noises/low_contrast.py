@@ -12,7 +12,7 @@ class LowContrast(NoiseBase):
     """
     
     PARAM_RANGES = {
-        "alpha": (0.3, 1.0),  # Contrast factor (lower = worse)
+        "alpha": (0.1, 1.0),  # Wider range for aggressive low-contrast schedules
     }
     
     def __init__(self, **kwargs):
@@ -30,5 +30,6 @@ class LowContrast(NoiseBase):
     def apply(self, x: np.ndarray) -> np.ndarray:
         alpha = float(self.params.get("alpha", 0.75))  # <1 reduce contrast
         beta = float(self.params.get("beta", 0.0))
-        y = x.astype(np.float32) * alpha + beta
+        # Contrast change around mid-gray keeps global brightness more stable.
+        y = (x.astype(np.float32) - 128.0) * alpha + 128.0 + beta
         return np.clip(y, 0, 255).astype(np.uint8)

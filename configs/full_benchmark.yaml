@@ -174,12 +174,19 @@ models:
 # ─────────────────────────────────────────────────────────────────────────
 noises:
   - gaussian
-  - poisson
+  - speckle
   - salt_pepper
   - motion_blur
-  - bias_field
+  - jpeg
+  - pixelation
+  - low_brightness
+  - high_brightness
   - low_contrast
-  - speckle
+  - high_contrast
+
+  # - bias_field
+
+  # - poisson
 
 levels: [L0, L1, L2, L3, L4, L5, L6, L7, L8, L9]
 
@@ -205,78 +212,133 @@ noise_config:
 protocols:
   coupled_presets:
     gaussian:
-      L1: {p: 1, sigma: 3}
-      L2: {p: 1, sigma: 6}
-      L3: {p: 1, sigma: 10}
-      L4: {p: 1, sigma: 15}
-      L5: {p: 1, sigma: 20}
-      L6: {p: 1, sigma: 30}
-      L7: {p: 1, sigma: 40}
-      L8: {p: 1, sigma: 55}
+      L1: {p: 1, sigma: 5}
+      L2: {p: 1, sigma: 10}
+      L3: {p: 1, sigma: 20}
+      L4: {p: 1, sigma: 30}
+      L5: {p: 1, sigma: 40}
+      L6: {p: 1, sigma: 50}
+      L7: {p: 1, sigma: 60}
+      L8: {p: 1, sigma: 70}
       L9: {p: 1, sigma: 80}
 
-    poisson:
-      L1: {p: 1, lam: 80}
-      L2: {p: 1, lam: 60}
-      L3: {p: 1, lam: 50}
-      L4: {p: 1, lam: 30}
-      L5: {p: 1, lam: 20}
-      L6: {p: 1, lam: 14}
-      L7: {p: 1, lam: 10}
-      L8: {p: 1, lam: 7}
-      L9: {p: 1, lam: 4}
+    speckle:
+      L1: {sigma: 0.05}
+      L2: {sigma: 0.1}
+      L3: {sigma: 0.2}
+      L4: {sigma: 0.3}
+      L5: {sigma: 0.45}
+      L6: {sigma: 0.55}
+      L7: {sigma: 0.65}
+      L8: {sigma: 0.75}
+      L9: {sigma: 0.9}
 
     salt_pepper:
-      L1: {p: 1, amount: 0.002}
-      L2: {p: 1, amount: 0.005}
-      L3: {p: 1, amount: 0.008}
-      L4: {p: 1, amount: 0.015}
-      L5: {p: 1, amount: 0.02}
-      L6: {p: 1, amount: 0.03}
-      L7: {p: 1, amount: 0.05}
-      L8: {p: 1, amount: 0.075}
-      L9: {p: 1, amount: 0.1}
+      L1: {p: 1, amount: 0.01}
+      L2: {p: 1, amount: 0.03}
+      L3: {p: 1, amount: 0.05}
+      L4: {p: 1, amount: 0.08}
+      L5: {p: 1, amount: 0.1}
+      L6: {p: 1, amount: 0.15}
+      L7: {p: 1, amount: 0.25}
+      L8: {p: 1, amount: 0.35}
+      L9: {p: 1, amount: 0.5}
 
     motion_blur:
       L1: {p: 1, k: 3, angle: 15}
       L2: {p: 1, k: 5, angle: 15}
       L3: {p: 1, k: 7, angle: 15}
       L4: {p: 1, k: 9, angle: 15}
-      L5: {p: 1, k: 11, angle: 15}
-      L6: {p: 1, k: 13, angle: 15}
-      L7: {p: 1, k: 17, angle: 15}
+      L5: {p: 1, k: 12, angle: 15}
+      L6: {p: 1, k: 15, angle: 15}
+      L7: {p: 1, k: 18, angle: 15}
       L8: {p: 1, k: 25, angle: 15}
-      L9: {p: 1, k: 35, angle: 15}
+      L9: {p: 1, k: 40, angle: 15}
+    jpeg:
+      L1: {p: 1, quality: 90}
+      L2: {p: 1, quality: 80}
+      L3: {p: 1, quality: 70}
+      L4: {p: 1, quality: 60}
+      L5: {p: 1, quality: 50}
+      L6: {p: 1, quality: 40}
+      L7: {p: 1, quality: 30}
+      L8: {p: 1, quality: 15}
+      L9: {p: 1, quality: 5}
+    
+    pixelation:
+      L1: {p: 1, block_size: 2}
+      L2: {p: 1, block_size: 4}
+      L3: {p: 1, block_size: 8}
+      L4: {p: 1, block_size: 16}
+      L5: {p: 1, block_size: 20}
+      L6: {p: 1, block_size: 24}
+      L7: {p: 1, block_size: 32}
+      L8: {p: 1, block_size: 40}
+      L9: {p: 1, block_size: 50}
+    low_brightness:
+      L1: {p: 1, factor: 1}
+      L2: {p: 1, factor: 0.95}
+      L3: {p: 1, factor: 0.8}
+      L4: {p: 1, factor: 0.6}
+      L5: {p: 1, factor: 0.4}
+      L6: {p: 1, factor: 0.25}
+      L7: {p: 1, factor: 0.15}
+      L8: {p: 1, factor: 0.1}
+      L9: {p: 1, factor: 0.05}
 
-    bias_field:
-      L1: {p: 1, strength: 0.08, smooth: 96}
-      L2: {p: 1, strength: 0.15, smooth: 96}
-      L3: {p: 1, strength: 0.25, smooth: 96}
-      L4: {p: 1, strength: 0.35, smooth: 96}
-      L5: {p: 1, strength: 0.45, smooth: 96}
-      L6: {p: 1, strength: 0.60, smooth: 96}
-      L7: {p: 1, strength: 0.75, smooth: 96}
-      L8: {p: 1, strength: 1.0, smooth: 96}
-      L9: {p: 1, strength: 1.25, smooth: 96}
-
+    high_brightness:
+      L1: {p: 1, factor: 1.05}
+      L2: {p: 1, factor: 1.2}
+      L3: {p: 1, factor: 1.4}
+      L4: {p: 1, factor: 1.70}
+      L5: {p: 1, factor: 2.0}
+      L6: {p: 1, factor: 2.50}
+      L7: {p: 1, factor: 3.0}
+      L8: {p: 1, factor: 4.0}
+      L9: {p: 1, factor: 5.0}
     low_contrast:
-      L1: {p: 1, alpha: 0.95, beta: 0.0}
-      L2: {p: 1, alpha: 0.90, beta: 0.0}
-      L3: {p: 1, alpha: 0.82, beta: 0.0}
-      L4: {p: 1, alpha: 0.74, beta: 0.0}
-      L5: {p: 1, alpha: 0.66, beta: 0.0}
-      L6: {p: 1, alpha: 0.58, beta: 0.0}
-      L7: {p: 1, alpha: 0.50, beta: 0.0}
-      L8: {p: 1, alpha: 0.40, beta: 0.0}
-      L9: {p: 1, alpha: 0.30, beta: 0.0}
+      L1: {p: 1, alpha: 1, beta: 0.0}
+      L2: {p: 1, alpha: 0.95, beta: 0.0}
+      L3: {p: 1, alpha: 0.9, beta: 0.0}
+      L4: {p: 1, alpha: 0.8, beta: 0.0}
+      L5: {p: 1, alpha: 0.7, beta: 0.0}
+      L6: {p: 1, alpha: 0.5, beta: 0.0}
+      L7: {p: 1, alpha: 0.35, beta: 0.0}
+      L8: {p: 1, alpha: 0.2, beta: 0.0}
+      L9: {p: 1, alpha: 0.1, beta: 0.0}
 
-    speckle:
-      L1: {sigma: 0.02}
-      L2: {sigma: 0.04}
-      L3: {sigma: 0.08}
-      L4: {sigma: 0.10}
-      L5: {sigma: 0.14}
-      L6: {sigma: 0.18}
-      L7: {sigma: 0.24}
-      L8: {sigma: 0.30}
-      L9: {sigma: 0.34}
+    high_contrast:
+      L1: {p: 1, factor: 1.5}
+      L2: {p: 1, factor: 2.0}
+      L3: {p: 1, factor: 2.50}
+      L4: {p: 1, factor: 3.0}
+      L5: {p: 1, factor: 4.0}
+      L6: {p: 1, factor: 4.5}
+      L7: {p: 1, factor: 5.5}
+      L8: {p: 1, factor: 6.5}
+      L9: {p: 1, factor: 8.0}
+
+
+
+
+
+    # poisson:
+    #   L1: {p: 1, lam: 80}
+    #   L2: {p: 1, lam: 60}
+    #   L3: {p: 1, lam: 50}
+    #   L4: {p: 1, lam: 30}
+    #   L5: {p: 1, lam: 20}
+    #   L6: {p: 1, lam: 14}
+    #   L7: {p: 1, lam: 10}
+    #   L8: {p: 1, lam: 7}
+    #   L9: {p: 1, lam: 4}
+    # bias_field:
+    #   L1: {p: 1, strength: 0.08, smooth: 96}
+    #   L2: {p: 1, strength: 0.15, smooth: 96}
+    #   L3: {p: 1, strength: 0.25, smooth: 96}
+    #   L4: {p: 1, strength: 0.35, smooth: 96}
+    #   L5: {p: 1, strength: 0.45, smooth: 96}
+    #   L6: {p: 1, strength: 0.60, smooth: 96}
+    #   L7: {p: 1, strength: 0.75, smooth: 96}
+    #   L8: {p: 1, strength: 1.0, smooth: 96}
+    #   L9: {p: 1, strength: 1.25, smooth: 96}

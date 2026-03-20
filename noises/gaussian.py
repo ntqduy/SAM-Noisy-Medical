@@ -7,11 +7,11 @@ class GaussianNoise(NoiseBase):
     Additive Gaussian noise.
     
     Parameters:
-        sigma: Standard deviation of noise (typically 0-50 for uint8 images)
+        sigma: Standard deviation of noise (supports stronger levels up to ~80+)
     """
     
     PARAM_RANGES = {
-        "sigma": (0.0, 50.0),  # Standard deviation range
+        "sigma": (0.0, 90.0),  # Keep headroom for aggressive L8-L9 setups
     }
     
     def __init__(self, **kwargs):

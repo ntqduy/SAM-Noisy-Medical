@@ -24,7 +24,7 @@ class MotionBlur(NoiseBase):
     """
     
     PARAM_RANGES = {
-        "k": (3, 25),  # Kernel size
+        "k": (3, 41),  # Kernel size (oddized in apply/motion_kernel)
         "angle": (0, 180),  # Angle range
     }
     
