@@ -154,6 +154,13 @@ models:
     checkpoint: "weights/UltraSam.pth"
     prompt_modes: ["prompt_point","prompt_bbox","prompt_point_box"]
     config: "models/external/UltraSam/configs/UltraSAM/UltraSAM_full/UltraSAM_box_refine.py"
+    # Optional mode-specific configs for fair prompt-mode benchmarking:
+    # - point uses point-refine config
+    # - bbox keeps box-refine config
+    # - point+box can be chosen explicitly (defaults to `config` if omitted)
+    config_point: "models/external/UltraSam/configs/UltraSAM/UltraSAM_full/UltraSAM_point_refine.py"
+    config_bbox: "models/external/UltraSam/configs/UltraSAM/UltraSAM_full/UltraSAM_box_refine.py"
+    config_point_box: "models/external/UltraSam/configs/UltraSAM/UltraSAM_full/UltraSAM_box_refine.py"
     force_box_for_point: false
     point_box_fusion: "best_score"
 

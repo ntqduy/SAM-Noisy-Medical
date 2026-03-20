@@ -63,6 +63,30 @@ class UltraSAMRunner(ModelRunner):
             # a clear runtime error from inference.
             self._mha_monkey_patched = False
 
+    def _mode_suffix(self) -> Optional[str]:
+        mapping = {
+            "prompt_point": "point",
+            "prompt_bbox": "bbox",
+            "prompt_point_box": "point_box",
+        }
+        return mapping.get(str(self.prompt_mode))
+
+    def _mode_cfg_value(self, base_key: str, default_value):
+        """
+        Resolve model_cfg value with optional prompt-mode-specific override.
+
+        Priority:
+        1) `<base_key>_<mode_suffix>` e.g. config_point / config_bbox / config_point_box
+        2) `<base_key>`
+        3) `default_value`
+        """
+        suffix = self._mode_suffix()
+        if suffix:
+            mode_key = f"{base_key}_{suffix}"
+            if mode_key in self.model_cfg:
+                return self.model_cfg.get(mode_key)
+        return self.model_cfg.get(base_key, default_value)
+
     def load_model(self) -> None:
         attempted_backend = "unknown"
         try:
@@ -84,7 +108,7 @@ class UltraSAMRunner(ModelRunner):
 
                 # Use the box-refine config by default; it matches bundled UltraSAM checkpoints.
                 # If caller provides a custom config (e.g., point/no-refine weights), it overrides.
-                cfg = self.model_cfg.get(
+                cfg = self._mode_cfg_value(
                     "config",
                     os.path.join(
                         ultrasam_root,
@@ -94,7 +118,7 @@ class UltraSAMRunner(ModelRunner):
                         "UltraSAM_box_refine.py",
                     ),
                 )
-                ckpt = self.model_cfg.get("checkpoint", "weights/UltraSam.pth")
+                ckpt = self._mode_cfg_value("checkpoint", "weights/UltraSam.pth")
 
                 # Map relative paths from project root.
                 project_root = os.path.abspath(
