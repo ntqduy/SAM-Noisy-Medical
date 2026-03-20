@@ -39,6 +39,29 @@ class UltraSAMRunner(ModelRunner):
         self._model = None
         self._backend = None
         self._mode_warning_emitted = False
+        self._mha_monkey_patched = False
+
+    def _ensure_ultrasam_mha_patch(self) -> None:
+        """Apply UltraSAM's custom MHA functional patch for inference paths.
+
+        UltraSAM upstream normally applies this via a runtime hook in MMEngine
+        training/testing loops. Our wrapper calls `model.test_step` directly,
+        so we patch here as well to keep behavior consistent.
+        """
+        if self._mha_monkey_patched:
+            return
+        try:
+            from endosam.models.utils.custom_functional import (
+                multi_head_attention_forward as ultrasam_mha_forward,
+            )
+            import torch.nn.functional as F
+
+            F.multi_head_attention_forward = ultrasam_mha_forward
+            self._mha_monkey_patched = True
+        except Exception:
+            # If patching fails, keep default behavior and let downstream raise
+            # a clear runtime error from inference.
+            self._mha_monkey_patched = False
 
     def load_model(self) -> None:
         attempted_backend = "unknown"
@@ -59,9 +82,8 @@ class UltraSAMRunner(ModelRunner):
                     sys.path.insert(0, ultrasam_root)
                 from mmdet.apis import init_detector
 
-                # Use the box-refine config by default; it matches the bundled checkpoint.
-                # If caller provides a custom config (e.g., point-trained weights), it will override.
-                # Default to box_no_refine config to match checkpoint embed dims (avoid 128/256 mismatch).
+                # Use the box-refine config by default; it matches bundled UltraSAM checkpoints.
+                # If caller provides a custom config (e.g., point/no-refine weights), it overrides.
                 cfg = self.model_cfg.get(
                     "config",
                     os.path.join(
@@ -69,7 +91,7 @@ class UltraSAMRunner(ModelRunner):
                         "configs",
                         "UltraSAM",
                         "UltraSAM_full",
-                        "UltraSAM_box_no_refine.py",
+                        "UltraSAM_box_refine.py",
                     ),
                 )
                 ckpt = self.model_cfg.get("checkpoint", "weights/UltraSam.pth")
@@ -82,6 +104,9 @@ class UltraSAMRunner(ModelRunner):
                     cfg = os.path.join(project_root, cfg)
                 if not os.path.isabs(ckpt):
                     ckpt = os.path.join(project_root, ckpt)
+
+                # Keep UltraSAM attention behavior aligned with upstream hooks.
+                self._ensure_ultrasam_mha_patch()
 
                 infer_device = self.device
                 if str(self.device).startswith("cuda"):
