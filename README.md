@@ -112,6 +112,17 @@ Optional Stage-1 optimization flags in config:
   Reuse noisy images across models/prompt modes (same dataset/image/noise/level/seed).
 - `stage1.noise_cache_dir: "noise_cache"`  
   Relative path under `outputs/{exp}` (or absolute path).
+- `stage1.clear_noise_cache_on_start: false`  
+  If `true`, delete existing noisy-image cache at startup before a new run.
+- `stage1.gc_collect_interval: 0`  
+  Periodic `gc.collect()` every N samples (`0` = disable periodic GC).
+- `stage1.cuda_cache_clear_interval: 0`  
+  Periodic `torch.cuda.empty_cache()` every N samples (`0` = disable periodic CUDA cache cleanup).
+
+Runtime behavior:
+
+- The engine always performs forced cleanup before loading each heavy model runner and after releasing a runner.
+- Use interval options only when needed for long runs under tight VRAM.
 
 Example targeted run:
 

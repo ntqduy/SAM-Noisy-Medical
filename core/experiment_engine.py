@@ -25,6 +25,7 @@ import gc
 import hashlib
 import os
 import re
+import shutil
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -170,6 +171,9 @@ class ExperimentEngine:
         self.save_artifacts: bool = bool(s1.get("save_artifacts", True))
         self.artifact_samples_per_case: int = int(s1.get("artifact_samples_per_case", 5))
         self.cache_noisy_images: bool = bool(s1.get("cache_noisy_images", True))
+        self.clear_noise_cache_on_start: bool = bool(s1.get("clear_noise_cache_on_start", False))
+        self.gc_collect_interval: int = int(max(0, s1.get("gc_collect_interval", 0)))
+        self.cuda_cache_clear_interval: int = int(max(0, s1.get("cuda_cache_clear_interval", 0)))
         cache_dir_cfg = s1.get("noise_cache_dir")
         if cache_dir_cfg:
             cache_dir = Path(str(cache_dir_cfg))
@@ -178,6 +182,8 @@ class ExperimentEngine:
         else:
             cache_dir = self.exp_dir / "noise_cache"
         self.noise_cache_dir: Path = cache_dir
+        if self.clear_noise_cache_on_start and self.noise_cache_dir.exists():
+            shutil.rmtree(self.noise_cache_dir, ignore_errors=True)
         if self.cache_noisy_images:
             self.noise_cache_dir.mkdir(parents=True, exist_ok=True)
 
@@ -225,6 +231,8 @@ class ExperimentEngine:
 
                 prompt_modes = self._get_prompt_modes(mdl_cfg)
                 for pm in prompt_modes:
+                    # Proactive cache cleanup before loading the next heavy model.
+                    self._runtime_cache_cleanup(force=True)
                     runner = self.model_manager.get_model(
                         runner_name, prompt_mode=pm, model_cfg=mdl_cfg,
                     )
@@ -290,6 +298,7 @@ class ExperimentEngine:
             total = n_samples * len(noise_cases)
             desc = f"{ds_name}/{mdl_name}/{prompt_mode}"
             pbar = tqdm(total=total, desc=desc, leave=False)
+            step_idx = 0
 
             for case in noise_cases:
                 for idx in range(n_samples):
@@ -357,6 +366,8 @@ class ExperimentEngine:
                         pred_mask=pred_mask,
                     )
                     pbar.update(1)
+                    step_idx += 1
+                    self._runtime_cache_cleanup(step_idx=step_idx)
             pbar.close()
 
     # ── noise case builder ───────────────────────────────────────────────
@@ -435,16 +446,42 @@ class ExperimentEngine:
             except Exception:
                 pass
 
-        gc.collect()
-        try:
-            import torch
+        self._runtime_cache_cleanup(force=True)
 
-            if torch.cuda.is_available():
-                torch.cuda.empty_cache()
-                if hasattr(torch.cuda, "ipc_collect"):
-                    torch.cuda.ipc_collect()
-        except Exception:
-            pass
+    def _runtime_cache_cleanup(
+        self,
+        *,
+        force: bool = False,
+        step_idx: Optional[int] = None,
+    ) -> None:
+        """
+        Runtime memory cleanup helper.
+
+        - `force=True`: always run `gc.collect()` and CUDA cache cleanup.
+        - periodic mode: run based on configured intervals.
+        """
+        do_gc = force
+        do_cuda = force
+
+        if not force and step_idx is not None:
+            if self.gc_collect_interval > 0 and step_idx % self.gc_collect_interval == 0:
+                do_gc = True
+            if self.cuda_cache_clear_interval > 0 and step_idx % self.cuda_cache_clear_interval == 0:
+                do_cuda = True
+
+        if do_gc:
+            gc.collect()
+
+        if do_cuda:
+            try:
+                import torch
+
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+                    if hasattr(torch.cuda, "ipc_collect"):
+                        torch.cuda.ipc_collect()
+            except Exception:
+                pass
 
     # ── noisy-image cache ────────────────────────────────────────────────
 

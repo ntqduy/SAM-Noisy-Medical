@@ -22,6 +22,11 @@ device: "cuda"
 stage1:
   save_artifacts: true
   artifact_samples_per_case: 3
+  cache_noisy_images: true
+  noise_cache_dir: "noise_cache"
+  clear_noise_cache_on_start: false
+  gc_collect_interval: 0
+  cuda_cache_clear_interval: 0
 
 # ─────────────────────────────────────────────────────────────────────────
 #  DATASETS
