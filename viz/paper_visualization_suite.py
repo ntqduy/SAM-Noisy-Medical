@@ -20,7 +20,7 @@ import numpy as np
 import pandas as pd
 import seaborn as sns
 from matplotlib.backends.backend_pdf import PdfPages
-from models.wrappers.prompt_utils import resolve_prompt
+from models.wrappers.prompt_utils import resolve_prompt, normalize_prompt_mode
 
 
 def _slugify(name: str) -> str:
@@ -42,19 +42,20 @@ def _coerce_str_series(s: pd.Series) -> pd.Series:
 
 
 def _canonical_prompt_mode(raw: object) -> str:
-    val = str(raw or "").strip().lower()
-    aliases = {
-        "prompt_point": "prompt_point",
-        "point": "prompt_point",
-        "prompt_bbox": "prompt_bbox",
-        "bbox": "prompt_bbox",
-        "box": "prompt_bbox",
-        "prompt_point_box": "prompt_point_box",
-        "point_box": "prompt_point_box",
-        "point+bbox": "prompt_point_box",
-        "pointbox": "prompt_point_box",
-    }
-    return aliases.get(val, val or "prompt_unknown")
+    """
+    Normalize prompt mode using the same logic as model layer.
+
+    Supports all standard modes: prompt_point, prompt_bbox, prompt_point_box, prompt_multi_point, autogen.
+    Also supports display aliases: point, bbox, point+bbox.
+
+    Uses normalize_prompt_mode() from models/wrappers/prompt_utils.py for consistency.
+    """
+    try:
+        return normalize_prompt_mode(str(raw or ""))
+    except ValueError:
+        # For CSV data, return "prompt_unknown" as fallback instead of raising
+        # This allows visualization to continue even with malformed CSV
+        return "prompt_unknown"
 
 
 def _prompt_display(canonical_prompt: str) -> str:
@@ -283,6 +284,14 @@ class PaperVisualizationSuite:
     # -- 1) prompt schematic ---------------------------------------------------
 
     def plot_prompt_mode_schematic(self) -> Path:
+        """
+        Generate schematic diagrams for the 3 standard prompt modes:
+        - prompt_point: single foreground click
+        - prompt_bbox: ground-truth bounding box with adaptive margin
+        - prompt_point_box: single click + ground-truth box combination
+
+        All modes use resolve_prompt() to follow the exact model setup.
+        """
         out_dir = self._dataset_dir("all_datasets")
         out_pdf = out_dir / "schematic_prompt_modes_point_bbox_pointplusbbox.pdf"
 
@@ -292,6 +301,7 @@ class PaperVisualizationSuite:
 
         # Synthetic foreground is intentionally off-center to avoid accidental
         # alignment with image center in prompt visual examples.
+        # Two ellipses to simulate disconnected structures (e.g., left/right lungs).
         fg = (
             ((xx - 100) ** 2) / (52.0**2) + ((yy - 132) ** 2) / (34.0**2) <= 1.0
         ) | (
@@ -300,21 +310,28 @@ class PaperVisualizationSuite:
         bg[fg] = 156
         gt_mask = fg.astype(np.uint8)
 
+        # Define prompt modes: (display_label, normalized_prompt_mode)
+        # All modes must match normalize_prompt_mode() output from models/wrappers/prompt_utils.py
         modes = [
             ("point", "prompt_point"),
             ("bbox", "prompt_bbox"),
-            ("point+bbox", "prompt_point_box"),
+            ("point+bbox", "prompt_point_box"),  # Combination mode with both point and box
         ]
         fig, axes = plt.subplots(1, 3, figsize=(9.4, 3.2))
 
-        for ax, (label, mode) in zip(axes, modes):
+        for ax, (display_label, prompt_mode) in zip(axes, modes):
+            # Resolve prompt using model's exact logic
             resolved = resolve_prompt(
                 {"gt_mask": gt_mask},
                 image_shape=(size, size),
-                prompt_mode=mode,
+                prompt_mode=prompt_mode,  # Must be one of: prompt_point, prompt_bbox, prompt_point_box
             )
             ax.imshow(bg, cmap="gray", vmin=0, vmax=255)
 
+            # ─── Render bounding box if present ──────────────────────────────
+            # prompt_bbox: always has bbox, no points
+            # prompt_point: no bbox
+            # prompt_point_box: always has bbox + one point
             bbox = resolved.get("bbox")
             if bbox is not None:
                 x0, y0, x1, y1 = [int(v) for v in bbox]
@@ -324,31 +341,41 @@ class PaperVisualizationSuite:
                     max(1, y1 - y0 + 1),
                     fill=False,
                     linewidth=2.0,
-                    edgecolor="#E67E22",
+                    edgecolor="#E67E22",  # Orange for bbox
+                    label="bbox" if prompt_mode in ("prompt_bbox", "prompt_point_box") else None,
                 )
                 ax.add_patch(rect)
 
+            # ─── Render point(s) if present ─────────────────────────────────
+            # prompt_point: exactly one point (clamped by resolve_prompt)
+            # prompt_bbox: no points
+            # prompt_point_box: exactly one point + bbox
             point = resolved.get("point")
             if point is None:
+                # Fallback: extract first point from points array if available
                 pts = resolved.get("points")
                 if pts is not None and np.asarray(pts).size >= 2:
                     p0 = np.asarray(pts).reshape(-1, 2)[0]
                     point = (int(p0[0]), int(p0[1]))
+
             if point is not None:
                 ax.scatter(
                     [int(point[0])],
                     [int(point[1])],
-                    c="#1F77B4",
-                    s=30,
+                    c="#1F77B4",  # Blue for point
+                    s=40,
                     marker="o",
                     edgecolors="white",
                     linewidths=0.8,
                     zorder=5,
+                    label="point" if prompt_mode in ("prompt_point", "prompt_point_box") else None,
                 )
 
             ax.set_xticks([])
             ax.set_yticks([])
-            ax.set_xlabel(label)
+            ax.set_xlabel(display_label, fontsize=12, fontweight="bold")
+            ax.set_title(f"[{prompt_mode}]", fontsize=8, color="gray", style="italic")
+
         fig.tight_layout()
         fig.savefig(out_pdf, format="pdf")
         plt.close(fig)

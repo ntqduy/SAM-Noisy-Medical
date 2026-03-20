@@ -16,6 +16,7 @@ def normalize_prompt_mode(prompt_mode: str) -> str:
         "point": "prompt_point", "prompt_point": "prompt_point",
         "multi_point": "prompt_multi_point", "prompt_multi_point": "prompt_multi_point",
         "point_box": "prompt_point_box", "pointbox": "prompt_point_box",
+        "point+bbox": "prompt_point_box",  # Visualization display alias for point+box
         "prompt_point_box": "prompt_point_box",
         "autogen": "autogen", "auto": "autogen", "automatic": "autogen",
     }
