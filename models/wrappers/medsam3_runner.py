@@ -51,12 +51,42 @@ class MedSAM3Runner(ModelRunner):
         self._processor_cls = None
         self._oom_cpu_fallback_used = False
 
+    @staticmethod
+    def _resolve_existing_path(project_root: str, raw_path: str, *extra_candidates: str) -> str:
+        candidates = []
+        if raw_path:
+            candidates.append(raw_path)
+            if not os.path.isabs(raw_path):
+                candidates.append(os.path.join(project_root, raw_path))
+                candidates.append(os.path.join(project_root, "weights", os.path.basename(raw_path)))
+        candidates.extend(extra_candidates)
+
+        checked = []
+        seen = set()
+        for candidate in candidates:
+            if not candidate:
+                continue
+            normalized = os.path.abspath(candidate)
+            if normalized in seen:
+                continue
+            seen.add(normalized)
+            checked.append(normalized)
+            if os.path.exists(normalized):
+                return normalized
+
+        raise FileNotFoundError(
+            f"Required MedSAM3 file was not found. Checked: {', '.join(checked)}"
+        )
+
     def load_model(self) -> None:
         try:
             external_root = os.path.join(
                 os.path.dirname(__file__), os.pardir, "external"
             )
             external_root = os.path.abspath(external_root)
+            project_root = os.path.abspath(
+                os.path.join(os.path.dirname(__file__), os.pardir, os.pardir)
+            )
 
             sam3_root = os.path.join(external_root, "sam3")
             medsam3_root = os.path.join(external_root, "MedSAM3")
@@ -68,9 +98,21 @@ class MedSAM3Runner(ModelRunner):
             from sam3.model_builder import build_sam3_image_model
             from sam3.model.sam3_image_processor import Sam3Processor
 
-            base_ckpt = self.model_cfg.get("checkpoint", "weights/sam3.pt")
-            lora_weights = self.model_cfg.get(
-                "lora_weights", "weights/MedSAM3/best_lora_weights.pt"
+            base_ckpt = self._resolve_existing_path(
+                project_root,
+                self.model_cfg.get("checkpoint", "weights/sam3.pt"),
+            )
+            lora_weights = self._resolve_existing_path(
+                project_root,
+                self.model_cfg.get("lora_weights", "weights/MedSAM3/best_lora_weights.pt"),
+                os.path.join(project_root, "weights", "MedSAM3", "best_lora_weights.pt"),
+            )
+            bpe_path = self._resolve_existing_path(
+                project_root,
+                self.model_cfg.get("bpe_path", ""),
+                os.path.join(medsam3_root, "sam3", "assets", "bpe_simple_vocab_16e6.txt.gz"),
+                os.path.join(medsam3_root, "assets", "bpe_simple_vocab_16e6.txt.gz"),
+                os.path.join(sam3_root, "assets", "bpe_simple_vocab_16e6.txt.gz"),
             )
 
             requested_device = str(self.device)
@@ -103,6 +145,7 @@ class MedSAM3Runner(ModelRunner):
                 load_device = "cpu"
             try:
                 self._model = build_sam3_image_model(
+                    bpe_path=bpe_path,
                     device=load_device,
                     compile=False,
                     checkpoint_path=base_ckpt,
@@ -126,6 +169,7 @@ class MedSAM3Runner(ModelRunner):
                         RuntimeWarning,
                     )
                     self._model = build_sam3_image_model(
+                        bpe_path=bpe_path,
                         device="cpu",
                         compile=False,
                         checkpoint_path=base_ckpt,
@@ -137,8 +181,7 @@ class MedSAM3Runner(ModelRunner):
                 else:
                     raise
 
-            if lora_weights and os.path.isfile(lora_weights):
-                self._apply_lora(lora_weights)
+            self._apply_lora(lora_weights)
 
             self._model.to(self.device)
             self._model.eval()
