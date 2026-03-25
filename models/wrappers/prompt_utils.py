@@ -39,7 +39,7 @@ def _foreground_coords(mask: np.ndarray) -> np.ndarray:
 
 def mask_to_bbox(
     mask: np.ndarray,
-    margin_ratio: float = 0.04,
+    margin_ratio: float = 0.05,
     min_margin_px: int = 2,
     max_margin_ratio: float = 0.12,
     fg_coords: Optional[np.ndarray] = None,
@@ -269,14 +269,18 @@ def resolve_prompt(
 
     # Unified benchmark setup:
     # - prompt_point: default one positive click (can be overridden via n_fg_points)
-    # - prompt_bbox: GT box with fixed margin
+    # - prompt_bbox: GT box with adaptive margin
     # - prompt_point_box: exactly one positive click + one GT box
     single_point_default = mode in ("prompt_point", "prompt_point_box")
     single_point = bool(prompt.get("single_point", single_point_default))
     requested_points = int(max(1, prompt.get("n_fg_points", 1 if single_point else 3)))
     auto_points_by_components = bool(prompt.get("auto_points_by_components", True))
     max_auto_fg_points = int(max(1, prompt.get("max_auto_fg_points", 2)))
-    bbox_margin_px = int(max(0, prompt.get("bbox_margin_px", 8)))
+    bbox_margin_ratio = float(max(0.0, prompt.get("bbox_margin_ratio", 0.05)))
+    bbox_min_margin_px = int(max(0, prompt.get("bbox_min_margin_px", 2)))
+    bbox_max_margin_ratio = float(
+        max(bbox_margin_ratio, prompt.get("bbox_max_margin_ratio", 0.12))
+    )
 
     user_point = prompt.get("point")
     user_bbox = prompt.get("bbox")
@@ -336,9 +340,9 @@ def resolve_prompt(
             bbox = _clip_bbox(
                 mask_to_bbox(
                     gt_mask,
-                    margin_ratio=0.0,
-                    min_margin_px=bbox_margin_px,
-                    max_margin_ratio=1.0,
+                    margin_ratio=bbox_margin_ratio,
+                    min_margin_px=bbox_min_margin_px,
+                    max_margin_ratio=bbox_max_margin_ratio,
                     fg_coords=fg_coords,
                 ),
                 image_shape,
