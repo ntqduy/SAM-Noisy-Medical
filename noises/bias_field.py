@@ -25,7 +25,10 @@ class BiasField(NoiseBase):
         strength = float(self.params.get("strength", 0.5))  # 0..1
         smooth = int(self.params.get("smooth", 64))
 
-        h, w = x.shape
+        arr = np.asarray(x)
+        h, w = arr.shape[:2]
+
+        # Generate smooth random bias field (2D)
         field = self.rng.normal(0.0, 1.0, size=(h, w)).astype(np.float32)
         k = max(3, smooth | 1)
         field = cv2.GaussianBlur(field, (k, k), 0)
@@ -33,5 +36,9 @@ class BiasField(NoiseBase):
         field = (field - field.min()) / (field.max() - field.min() + 1e-6)  # 0..1
         field = 1.0 + strength * (field - 0.5) * 2.0  # around 1.0
 
-        y = x.astype(np.float32) * field
+        # Apply field: for multi-channel, broadcast field over all channels
+        if arr.ndim == 3:
+            field = field[..., np.newaxis]  # (H, W, 1) for broadcasting
+
+        y = arr.astype(np.float32) * field
         return np.clip(y, 0, 255).astype(np.uint8)

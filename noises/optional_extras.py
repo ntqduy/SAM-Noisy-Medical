@@ -7,6 +7,7 @@ import cv2
 from noises.base import NoiseBase
 
 
+
 def _to_gray_uint8(x: np.ndarray) -> np.ndarray:
     """Convert input image to 2D uint8 grayscale."""
     arr = np.asarray(x)
@@ -61,35 +62,133 @@ class UniformNoise(NoiseBase):
         return np.clip(y, 0, 255).astype(np.uint8)
 
 
+
+
+
 class JPEGArtifacts(NoiseBase):
-    """JPEG compression artifacts."""
-    
+    """JPEG compression artifacts.
+
+    - Nếu input là grayscale 2D: nén JPEG trên ảnh xám.
+    - Nếu input là RGB/BGR 3D: nén JPEG trực tiếp trên ảnh màu.
+    - Giữ output cùng số chiều / số kênh với input.
+    """
+
     PARAM_RANGES = {"quality": (5, 95)}
-    
+
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self._noise_type = "jpeg"
-    
+
     def get_severity_scalar(self) -> float:
         """Lower quality = higher severity."""
         quality = float(self.params.get("quality", 40))
         min_q, max_q = self.PARAM_RANGES["quality"]
         normalized = 1.0 - (quality - min_q) / (max_q - min_q)
         return float(np.clip(normalized, 0.0, 1.0))
-    
+
     def apply(self, x: np.ndarray) -> np.ndarray:
+        """Apply JPEG compression artifacts while preserving input domain.
+
+        Parameters
+        ----------
+        x : np.ndarray
+            Input image. Supported:
+            - HxW
+            - HxWx1
+            - HxWx3
+
+        Returns
+        -------
+        np.ndarray
+            Image with JPEG artifacts, same shape as input.
+        """
+        if not isinstance(x, np.ndarray):
+            raise TypeError("Input x must be a numpy array.")
+
         quality = int(self.params.get("quality", 40))
-        gray = _to_gray_uint8(x)
-        rgb = cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR)
-        encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), max(1, min(95, quality))]
-        ok, enc = cv2.imencode(".jpg", rgb, encode_param)
-        if not ok:
-            return x
-        dec = cv2.imdecode(enc, cv2.IMREAD_COLOR)
-        out_gray = cv2.cvtColor(dec, cv2.COLOR_BGR2GRAY).astype(np.uint8)
-        return _restore_like_input(out_gray, x)
+        quality = max(1, min(95, quality))
 
+        x_uint8 = self._to_uint8_image(x)
 
+        # Case 1: grayscale 2D
+        if x_uint8.ndim == 2:
+            ok, enc = cv2.imencode(
+                ".jpg",
+                x_uint8,
+                [int(cv2.IMWRITE_JPEG_QUALITY), quality],
+            )
+            if not ok:
+                return x.copy()
+
+            dec = cv2.imdecode(enc, cv2.IMREAD_GRAYSCALE)
+            return self._restore_dtype_and_range(dec, x)
+
+        # Case 2: HxWx1 grayscale
+        if x_uint8.ndim == 3 and x_uint8.shape[2] == 1:
+            gray = x_uint8[:, :, 0]
+            ok, enc = cv2.imencode(
+                ".jpg",
+                gray,
+                [int(cv2.IMWRITE_JPEG_QUALITY), quality],
+            )
+            if not ok:
+                return x.copy()
+
+            dec = cv2.imdecode(enc, cv2.IMREAD_GRAYSCALE)
+            dec = dec[:, :, None]
+            return self._restore_dtype_and_range(dec, x)
+
+        # Case 3: HxWx3 color
+        if x_uint8.ndim == 3 and x_uint8.shape[2] == 3:
+            ok, enc = cv2.imencode(
+                ".jpg",
+                x_uint8,
+                [int(cv2.IMWRITE_JPEG_QUALITY), quality],
+            )
+            if not ok:
+                return x.copy()
+
+            dec = cv2.imdecode(enc, cv2.IMREAD_COLOR)
+            return self._restore_dtype_and_range(dec, x)
+
+        raise ValueError(
+            f"Unsupported input shape {x.shape}. Expected HxW, HxWx1, or HxWx3."
+        )
+
+    @staticmethod
+    def _to_uint8_image(x: np.ndarray) -> np.ndarray:
+        """Convert image to uint8 safely.
+
+        Supports:
+        - uint8 input: keep as is
+        - float input in [0, 1]: scale to [0, 255]
+        - float input in [0, 255]: clip and cast
+        """
+        if x.dtype == np.uint8:
+            return x.copy()
+
+        x_float = x.astype(np.float32)
+
+        if x_float.max() <= 1.0:
+            x_float = x_float * 255.0
+
+        x_float = np.clip(x_float, 0.0, 255.0)
+        return x_float.astype(np.uint8)
+
+    @staticmethod
+    def _restore_dtype_and_range(out_uint8: np.ndarray, ref: np.ndarray) -> np.ndarray:
+        """Restore output to match dtype/range style of reference input."""
+        if ref.dtype == np.uint8:
+            return out_uint8
+
+        out = out_uint8.astype(np.float32)
+
+        if np.issubdtype(ref.dtype, np.floating):
+            if ref.max() <= 1.0:
+                out = out / 255.0
+            return out.astype(ref.dtype)
+
+        return out.astype(ref.dtype)
 class PixelationNoise(NoiseBase):
     """Pixelation / blocky downsample-upsample artifacts."""
 
@@ -99,20 +198,27 @@ class PixelationNoise(NoiseBase):
         super().__init__(**kwargs)
         self._noise_type = "pixelation"
 
+    def get_severity_scalar(self) -> float:
+        block_size = float(self.params.get("block_size", 8))
+        min_b, max_b = self.PARAM_RANGES["block_size"]
+        normalized = (block_size - min_b) / (max_b - min_b)
+        return float(np.clip(normalized, 0.0, 1.0))
+
     def apply(self, x: np.ndarray) -> np.ndarray:
         block_size = int(self.params.get("block_size", 8))
         block_size = max(1, block_size)
-        gray = _to_gray_uint8(x)
-        h, w = gray.shape[:2]
+
+        h, w = x.shape[:2]
         small_w = max(1, w // block_size)
         small_h = max(1, h // block_size)
-        small = cv2.resize(gray, (small_w, small_h), interpolation=cv2.INTER_NEAREST)
-        restored = cv2.resize(small, (w, h), interpolation=cv2.INTER_NEAREST)
-        return _restore_like_input(restored.astype(np.uint8), x)
 
+        small = cv2.resize(x, (small_w, small_h), interpolation=cv2.INTER_NEAREST)
+        restored = cv2.resize(small, (w, h), interpolation=cv2.INTER_NEAREST)
+
+        return restored.astype(x.dtype, copy=False)
 
 class LowBrightnessNoise(NoiseBase):
-    """Darken image globally by multiplicative factor (<1)."""
+    """Darken image globally by multiplicative factor (<1) while preserving channels."""
 
     PARAM_RANGES = {"factor": (0.05, 1.0)}
 
@@ -121,20 +227,21 @@ class LowBrightnessNoise(NoiseBase):
         self._noise_type = "low_brightness"
 
     def get_severity_scalar(self) -> float:
-        factor = float(self.params.get("factor", 0.75))
         min_f, max_f = self.PARAM_RANGES["factor"]
+        factor = float(np.clip(self.params.get("factor", 0.75), min_f, max_f))
         normalized = 1.0 - (factor - min_f) / (max_f - min_f)
         return float(np.clip(normalized, 0.0, 1.0))
 
     def apply(self, x: np.ndarray) -> np.ndarray:
-        factor = float(self.params.get("factor", 0.75))
-        gray = _to_gray_uint8(x).astype(np.float32)
-        out = np.clip(gray * factor, 0, 255).astype(np.uint8)
-        return _restore_like_input(out, x)
+        min_f, max_f = self.PARAM_RANGES["factor"]
+        factor = float(np.clip(self.params.get("factor", 0.75), min_f, max_f))
 
+        arr = np.asarray(x).astype(np.float32)
+        out = np.clip(arr * factor, 0, 255).astype(np.uint8)
+        return out
 
 class HighBrightnessNoise(NoiseBase):
-    """Brighten image globally by multiplicative factor (>1)."""
+    """Brighten image globally by a multiplicative factor (>1) while preserving channels."""
 
     PARAM_RANGES = {"factor": (1.0, 5.0)}
 
@@ -142,28 +249,94 @@ class HighBrightnessNoise(NoiseBase):
         super().__init__(**kwargs)
         self._noise_type = "high_brightness"
 
-    def apply(self, x: np.ndarray) -> np.ndarray:
-        factor = float(self.params.get("factor", 1.25))
-        gray = _to_gray_uint8(x).astype(np.float32)
-        out = np.clip(gray * factor, 0, 255).astype(np.uint8)
-        return _restore_like_input(out, x)
+    def get_severity_scalar(self) -> float:
+        """
+        Map brightness factor to a normalized severity in [0, 1].
 
+        Returns
+        -------
+        float
+            0.0 means no brightness increase (factor=1.0),
+            1.0 means maximum configured brightness increase.
+        """
+        min_f, max_f = self.PARAM_RANGES["factor"]
+        factor = float(np.clip(self.params.get("factor", 1.25), min_f, max_f))
+        normalized = (factor - min_f) / (max_f - min_f)
+        return float(np.clip(normalized, 0.0, 1.0))
+
+    def apply(self, x: np.ndarray) -> np.ndarray:
+        """
+        Apply global brightness increase while preserving the original channel structure.
+
+        Parameters
+        ----------
+        x : np.ndarray
+            Input image. Expected dtype is typically uint8, but other numeric
+            dtypes are also accepted.
+
+        Returns
+        -------
+        np.ndarray
+            Brightened image with the same shape and dtype as the input when possible.
+        """
+        min_f, max_f = self.PARAM_RANGES["factor"]
+        factor = float(np.clip(self.params.get("factor", 1.25), min_f, max_f))
+
+        arr = np.asarray(x)
+        orig_dtype = arr.dtype
+
+        arr_f = arr.astype(np.float32)
+        out = np.clip(arr_f * factor, 0, 255)
+
+        if np.issubdtype(orig_dtype, np.integer):
+            return out.astype(orig_dtype)
+
+        return out.astype(np.float32)
 
 class HighContrastNoise(NoiseBase):
-    """Increase contrast around mid-gray pivot 128."""
+    """Increase image contrast around the mid-gray pivot 128 while preserving channels."""
 
-    PARAM_RANGES = {"factor": (1.0, 8.0)}
+    PARAM_RANGES = {"factor": (1.0, 10.0)}  # Extended to cover config L6-L9
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self._noise_type = "high_contrast"
 
+    def get_severity_scalar(self) -> float:
+        """
+        Map contrast factor to a normalized severity in [0, 1].
+
+        Returns
+        -------
+        float
+            0.0 means no contrast increase (factor=1.0),
+            1.0 means maximum configured contrast increase.
+        """
+        min_f, max_f = self.PARAM_RANGES["factor"]
+        factor = float(np.clip(self.params.get("factor", 1.4), min_f, max_f))
+        normalized = (factor - min_f) / (max_f - min_f)
+        return float(np.clip(normalized, 0.0, 1.0))
+
     def apply(self, x: np.ndarray) -> np.ndarray:
-        factor = float(self.params.get("factor", 1.4))
-        gray = _to_gray_uint8(x).astype(np.float32)
-        out = (gray - 128.0) * factor + 128.0
-        out = np.clip(out, 0, 255).astype(np.uint8)
-        return _restore_like_input(out, x)
+        """
+        Apply high-contrast degradation while preserving the original channel structure.
+
+        Parameters
+        ----------
+        x : np.ndarray
+            Input image, typically uint8.
+
+        Returns
+        -------
+        np.ndarray
+            Contrast-enhanced image in uint8 format.
+        """
+        min_f, max_f = self.PARAM_RANGES["factor"]
+        factor = float(np.clip(self.params.get("factor", 1.4), min_f, max_f))
+
+        arr = np.asarray(x).astype(np.float32)
+        out = (arr - 128.0) * factor + 128.0
+        return np.clip(out, 0, 255).astype(np.uint8)
 
 
 class QuantizationNoise(NoiseBase):
@@ -219,13 +392,16 @@ class CoarseDropout(NoiseBase):
         holes = int(self.params.get("holes", 8))
         size = int(self.params.get("size", 24))
         y = x.copy()
-        h, w = y.shape
+        h, w = y.shape[:2]
         for _ in range(holes):
             cx = int(self.rng.integers(0, w))
             cy = int(self.rng.integers(0, h))
             x0 = max(0, cx - size // 2); x1 = min(w, cx + size // 2)
             y0 = max(0, cy - size // 2); y1 = min(h, cy + size // 2)
-            y[y0:y1, x0:x1] = 0
+            if y.ndim == 2:
+                y[y0:y1, x0:x1] = 0
+            else:
+                y[y0:y1, x0:x1, :] = 0
         return y.astype(np.uint8)
 
 
@@ -250,9 +426,15 @@ class GridMask(NoiseBase):
         d = int(self.params.get("d", 48))
         r = int(self.params.get("r", 24))
         y = x.copy()
-        h, w = y.shape
+        h, w = y.shape[:2]
         for yy in range(0, h, d):
-            y[yy:yy+r, :] = 0
+            if y.ndim == 2:
+                y[yy:yy+r, :] = 0
+            else:
+                y[yy:yy+r, :, :] = 0
         for xx in range(0, w, d):
-            y[:, xx:xx+r] = 0
+            if y.ndim == 2:
+                y[:, xx:xx+r] = 0
+            else:
+                y[:, xx:xx+r, :] = 0
         return y.astype(np.uint8)

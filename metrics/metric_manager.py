@@ -58,7 +58,9 @@ def precision_score(pred: np.ndarray, gt: np.ndarray) -> float:
         return float("nan")
     c = _binary_counts(pred, gt)
     denom = c["tp"] + c["fp"]
-    return 1.0 if denom == 0 else float(c["tp"] / denom)
+    # When pred is empty (denom=0), return 0.0 (no correct predictions)
+    # instead of 1.0 which would misleadingly suggest perfect precision
+    return 0.0 if denom == 0 else float(c["tp"] / denom)
 
 
 def f1_score(pred: np.ndarray, gt: np.ndarray) -> float:

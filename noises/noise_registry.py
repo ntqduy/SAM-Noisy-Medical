@@ -10,7 +10,8 @@ from noises.poisson import PoissonNoise
 from noises.salt_pepper import SaltPepperNoise
 from noises.motion_blur import MotionBlur
 from noises.bias_field import BiasField
-from noises.low_contrast import LowContrast
+from noises.low_contrast import LowContrastNoise
+from noises.rician import RicianNoise
 from noises.optional_extras import (
     SpeckleNoise,
     UniformNoise,
@@ -32,7 +33,8 @@ _REGISTRY: Dict[str, Type[NoiseBase]] = {
     "salt_pepper": SaltPepperNoise,
     "motion_blur": MotionBlur,
     "bias_field": BiasField,
-    "low_contrast": LowContrast,
+    "low_contrast": LowContrastNoise,
+    "rician": RicianNoise,
     # optional / phase-2
     "speckle": SpeckleNoise,
     "uniform": UniformNoise,
