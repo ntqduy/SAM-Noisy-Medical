@@ -960,14 +960,14 @@ class ComprehensiveVisualization:
                 headers = ["Original", f"Noisy {target_level}", "GT"] + models
                 n_rows = len(rows)
                 n_cols = len(headers)
-                fig_w = max(12.0, 2.55 * n_cols)
-                fig_h = max(5.0, 2.2 * n_rows)
+                fig_w = max(14.0, 3.05 * n_cols)
+                fig_h = max(4.8, 2.45 * n_rows)
                 fig, axes = plt.subplots(
                     n_rows,
                     n_cols,
                     figsize=(fig_w, fig_h),
                     squeeze=False,
-                    gridspec_kw={"wspace": 0.03, "hspace": 0.12},
+                    gridspec_kw={"wspace": 0.015, "hspace": 0.06},
                 )
 
                 for r, (noise, sample_id, original_path, noisy_path, gt_path, pred_paths) in enumerate(rows):
@@ -986,7 +986,7 @@ class ComprehensiveVisualization:
                         if r == 0 and c < 3:
                             ax.set_xlabel(headers[c], fontsize=9)
                         if c == 0:
-                            ax.set_ylabel(str(noise), fontsize=9, rotation=90, va="center")
+                            ax.set_ylabel(str(noise), fontsize=9, rotation=90, va="center", labelpad=2)
                         if c >= 3:
                             model = models[c - 3]
                             dice = self._sample_metric_value(
@@ -1000,12 +1000,22 @@ class ComprehensiveVisualization:
                                 seed=seed,
                             )
                             if dice is None or not np.isfinite(dice):
-                                label = f"{model}\n(Dice: N/A)"
+                                label = f"{model} (Dice = N/A)"
                             else:
-                                label = f"{model}\n(Dice: {dice:.3f})"
-                            ax.set_xlabel(label, fontsize=8, labelpad=2)
+                                label = f"{model} (Dice = {dice:.2f})"
+                            ax.text(
+                                0.03,
+                                0.04,
+                                label,
+                                transform=ax.transAxes,
+                                ha="left",
+                                va="bottom",
+                                fontsize=7.6,
+                                color="white",
+                                bbox=dict(facecolor="black", edgecolor="none", alpha=0.58, pad=1.6),
+                            )
 
-                fig.subplots_adjust(left=0.035, right=0.995, top=0.995, bottom=0.035, wspace=0.03, hspace=0.12)
+                fig.subplots_adjust(left=0.022, right=0.997, top=0.995, bottom=0.022, wspace=0.015, hspace=0.06)
                 out_pdf = (
                     ds_dir
                     / f"{_slugify(ds)}_segmentation_gallery_{prompt_slug}_{target_level}_by_noise.pdf"
@@ -1063,7 +1073,6 @@ class ComprehensiveVisualization:
                     sharey=True,
                 )
                 level_to_x = {lv: i for i, lv in enumerate(levels)}
-                line_styles = ["-", "--", "-.", ":"]
                 markers = ["o", "s", "^", "D", "P", "X", "v", "<", ">", "h"]
 
                 for idx, noise in enumerate(noises):
@@ -1088,11 +1097,11 @@ class ComprehensiveVisualization:
                             xs,
                             ys,
                             marker=markers[model_idx % len(markers)],
-                            linestyle=line_styles[model_idx % len(line_styles)],
-                            linewidth=1.7,
+                            linestyle="-",
+                            linewidth=1.9,
                             markersize=4.0,
                             color=color,
-                            alpha=0.84,
+                            alpha=0.9,
                             markeredgecolor="white",
                             markeredgewidth=0.6,
                             label=model,
@@ -1135,10 +1144,10 @@ class ComprehensiveVisualization:
                         [0],
                         color=sns.desaturate(MODEL_PALETTE[i % len(MODEL_PALETTE)], 0.78),
                         marker=markers[i % len(markers)],
-                        linestyle=line_styles[i % len(line_styles)],
-                        linewidth=1.7,
+                        linestyle="-",
+                        linewidth=1.9,
                         markersize=4.0,
-                        alpha=0.84,
+                        alpha=0.9,
                         markeredgecolor="white",
                         markeredgewidth=0.6,
                     )
