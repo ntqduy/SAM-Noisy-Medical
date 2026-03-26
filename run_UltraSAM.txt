@@ -1,0 +1,13 @@
+Step 1: create venv python 3.10
+Step 2: In venv, install step by step:
+
+    pip install numpy==1.26.4
+    pip install torch==2.0.1 torchvision==0.15.2 --index-url https://download.pytorch.org/whl/cu118
+    pip install -U openmim
+    mim install "mmcv>=2.0.0,<2.1.0"
+    mim install mmengine
+    pip uninstall -y mmdet
+    pip install --no-build-isolation "mmdet==3.1.0"
+    pip uninstall -y numpy
+    pip install --no-cache-dir numpy==1.26.4
+    pip install mmpretrain
