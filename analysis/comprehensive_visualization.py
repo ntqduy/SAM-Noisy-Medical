@@ -20,6 +20,7 @@ Key features:
 from __future__ import annotations
 
 import re
+import shutil
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -394,6 +395,74 @@ class ComprehensiveVisualization:
         if vals.empty:
             return None
         return float(vals.mean())
+
+    @staticmethod
+    def _copy_visualization_image(src: Optional[Path], dst: Path) -> Optional[Path]:
+        """Copy one source image into the visualization output tree."""
+        if src is None or not src.exists():
+            return None
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(src, dst)
+        return dst
+
+    def _export_segmentation_gallery_assets(
+        self,
+        dataset: str,
+        prompt_mode: str,
+        noise: str,
+        target_level: str,
+        sample_id: str,
+        original_path: Path,
+        noisy_path: Path,
+        gt_path: Path,
+        pred_paths: Dict[str, Optional[Path]],
+        *,
+        seed: int = 0,
+    ) -> None:
+        """Export the exact images used by the segmentation gallery into output_dir."""
+        asset_dir = (
+            self._dataset_dir(dataset)
+            / "segmentation_gallery_assets"
+            / _slugify(_prompt_display(prompt_mode))
+            / str(target_level)
+            / _slugify(noise)
+            / _safe_image_id(sample_id)
+        )
+        asset_dir.mkdir(parents=True, exist_ok=True)
+
+        self._copy_visualization_image(original_path, asset_dir / "original.png")
+        self._copy_visualization_image(noisy_path, asset_dir / f"noisy_{target_level}.png")
+        self._copy_visualization_image(gt_path, asset_dir / "gt.png")
+
+        manifest_rows: List[Dict[str, Any]] = []
+        for model, pred_path in pred_paths.items():
+            copied_pred = self._copy_visualization_image(
+                pred_path,
+                asset_dir / f"{_slugify(model)}_pred.png",
+            )
+            dice = self._sample_metric_value(
+                dataset,
+                model,
+                prompt_mode,
+                noise,
+                target_level,
+                sample_id,
+                metric="Dice",
+                seed=seed,
+            )
+            manifest_rows.append({
+                "dataset": str(dataset),
+                "prompt_mode": str(prompt_mode),
+                "noise_type": str(noise),
+                "noise_level": str(target_level),
+                "sample_id": str(sample_id),
+                "model": str(model),
+                "dice": float(dice) if dice is not None and np.isfinite(dice) else np.nan,
+                "pred_filename": copied_pred.name if copied_pred is not None else "",
+            })
+
+        if manifest_rows:
+            pd.DataFrame(manifest_rows).to_csv(asset_dir / "predictions_manifest.csv", index=False)
 
     def plot_prompt_schematic(self) -> Path:
         """
@@ -908,37 +977,52 @@ class ComprehensiveVisualization:
 
             ds_df = self.df[self.df["dataset"] == ds]
             noises = sorted(ds_df["noise_type"].dropna().astype(str).unique().tolist())
+            # Lock one sample per noise so bbox / point / point+bbox always use
+            # the exact same source example in their qualitative galleries.
+            shared_rows_by_noise: Dict[str, Tuple[str, Path, Path, Path]] = {}
+            for noise in noises:
+                noisy_level_map = self._shared_noise_level_map(ds, noise, suffix="noisy")
+                sample_id = self._best_sample_id(noisy_level_map, [target_level])
+                if sample_id is None:
+                    continue
+
+                noisy_path = noisy_level_map.get(sample_id, {}).get(target_level)
+                if noisy_path is None or not noisy_path.exists():
+                    continue
+
+                noise_dir = shared_dir / _slugify(noise)
+                clean_dir = noise_dir / "L0" / f"seed{seed}"
+                level_dir = noise_dir / target_level / f"seed{seed}"
+
+                original_path = clean_dir / f"{sample_id}_original.png"
+                if not original_path.exists():
+                    original_path = level_dir / f"{sample_id}_original.png"
+                gt_path = clean_dir / f"{sample_id}_gt.png"
+                if not gt_path.exists():
+                    gt_path = level_dir / f"{sample_id}_gt.png"
+                if not original_path.exists() or not gt_path.exists():
+                    continue
+
+                shared_rows_by_noise[str(noise)] = (
+                    str(sample_id),
+                    original_path,
+                    noisy_path,
+                    gt_path,
+                )
 
             for prompt_mode in self._modes():
                 mode_df = ds_df[ds_df["prompt_mode"] == prompt_mode]
                 models = sorted(mode_df["model"].dropna().astype(str).unique().tolist())
-                if not models or not noises:
+                if not models or not shared_rows_by_noise:
                     continue
                 prompt_slug = _slugify(_prompt_display(prompt_mode))
 
                 rows: List[Tuple[str, str, Path, Path, Path, Dict[str, Optional[Path]]]] = []
                 for noise in noises:
-                    noisy_level_map = self._shared_noise_level_map(ds, noise, suffix="noisy")
-                    sample_id = self._best_sample_id(noisy_level_map, [target_level])
-                    if sample_id is None:
+                    shared_row = shared_rows_by_noise.get(str(noise))
+                    if shared_row is None:
                         continue
-
-                    noisy_path = noisy_level_map.get(sample_id, {}).get(target_level)
-                    if noisy_path is None or not noisy_path.exists():
-                        continue
-
-                    noise_dir = shared_dir / _slugify(noise)
-                    clean_dir = noise_dir / "L0" / f"seed{seed}"
-                    level_dir = noise_dir / target_level / f"seed{seed}"
-
-                    original_path = clean_dir / f"{sample_id}_original.png"
-                    if not original_path.exists():
-                        original_path = level_dir / f"{sample_id}_original.png"
-                    gt_path = clean_dir / f"{sample_id}_gt.png"
-                    if not gt_path.exists():
-                        gt_path = level_dir / f"{sample_id}_gt.png"
-                    if not original_path.exists() or not gt_path.exists():
-                        continue
+                    sample_id, original_path, noisy_path, gt_path = shared_row
 
                     pred_paths = {
                         model: self._prediction_artifact_path(
@@ -952,6 +1036,18 @@ class ComprehensiveVisualization:
                         )
                         for model in models
                     }
+                    self._export_segmentation_gallery_assets(
+                        ds,
+                        prompt_mode,
+                        noise,
+                        target_level,
+                        sample_id,
+                        original_path,
+                        noisy_path,
+                        gt_path,
+                        pred_paths,
+                        seed=seed,
+                    )
                     rows.append((noise, sample_id, original_path, noisy_path, gt_path, pred_paths))
 
                 if not rows:
@@ -1304,6 +1400,149 @@ class ComprehensiveVisualization:
     #  GENERATE ALL
     # ─────────────────────────────────────────────────────────────────────────
 
+    def plot_noise_line_galleries_by_model(
+        self,
+        dataset: Optional[str] = None,
+        metric: str = "Dice",
+        max_cols: int = 3,
+    ) -> Dict[str, Path]:
+        """
+        Generate one line-plot gallery per prompt mode with one subplot per model.
+
+        Each subplot corresponds to one model, and each line corresponds to one
+        noise type traced across all levels.
+        """
+        output_paths: Dict[str, Path] = {}
+        if metric not in self._metrics():
+            return output_paths
+
+        datasets = [dataset] if dataset else self._datasets()
+        metric_slug = _slugify(metric)
+
+        for ds in datasets:
+            ds_dir = self._dataset_dir(ds)
+            ds_df = self.df[self.df["dataset"] == ds]
+            levels = self._levels()
+            if not levels:
+                continue
+
+            for prompt_mode in self._modes():
+                mode_df = ds_df[ds_df["prompt_mode"] == prompt_mode]
+                models = sorted(mode_df["model"].dropna().astype(str).unique().tolist())
+                noises = sorted(mode_df["noise_type"].dropna().astype(str).unique().tolist())
+                if not models or not noises:
+                    continue
+
+                prompt_slug = _slugify(_prompt_display(prompt_mode))
+                n_cols = max(1, min(max_cols, len(models)))
+                n_rows = (len(models) + n_cols - 1) // n_cols
+                fig_w = max(10.0, 4.2 * n_cols)
+                fig_h = max(4.6, 3.3 * n_rows)
+                fig, axes = plt.subplots(
+                    n_rows,
+                    n_cols,
+                    figsize=(fig_w, fig_h),
+                    squeeze=False,
+                    sharex=True,
+                    sharey=True,
+                )
+                level_to_x = {lv: i for i, lv in enumerate(levels)}
+                markers = ["o", "s", "^", "D", "P", "X", "v", "<", ">", "h", "*", "p"]
+
+                for idx, model in enumerate(models):
+                    r = idx // n_cols
+                    c = idx % n_cols
+                    ax = axes[r, c]
+                    model_df = mode_df[mode_df["model"] == model]
+                    agg = (
+                        model_df.groupby(["noise_type", "noise_level", "level_idx"])[metric]
+                        .mean()
+                        .reset_index()
+                    )
+
+                    for noise_idx, noise in enumerate(noises):
+                        g = agg[agg["noise_type"] == noise].sort_values("level_idx")
+                        if g.empty:
+                            continue
+                        xs = [level_to_x[str(lv)] for lv in g["noise_level"]]
+                        ys = g[metric].astype(float).tolist()
+                        color = sns.desaturate(NOISE_PALETTE[noise_idx % len(NOISE_PALETTE)], 0.82)
+                        line, = ax.plot(
+                            xs,
+                            ys,
+                            marker=markers[noise_idx % len(markers)],
+                            linestyle="-",
+                            linewidth=1.8,
+                            markersize=3.8,
+                            color=color,
+                            alpha=0.9,
+                            markeredgecolor="white",
+                            markeredgewidth=0.6,
+                            label=noise,
+                        )
+                        line.set_path_effects([
+                            pe.Stroke(linewidth=2.7, foreground="white", alpha=0.62),
+                            pe.Normal(),
+                        ])
+
+                    ax.text(
+                        0.03,
+                        0.94,
+                        str(model),
+                        transform=ax.transAxes,
+                        ha="left",
+                        va="top",
+                        fontsize=7,
+                        bbox=dict(facecolor="white", edgecolor="none", alpha=0.68),
+                    )
+                    ax.set_xticks(range(len(levels)))
+                    ax.set_xticklabels(levels, rotation=30, ha="right")
+                    ax.grid(True, alpha=0.18, linewidth=0.5)
+                    if metric in UNIT_INTERVAL_METRICS:
+                        ax.set_ylim(0.0, 1.0)
+                    else:
+                        ax.set_ylim(bottom=0)
+                    if r == n_rows - 1:
+                        ax.set_xlabel("Noise Level")
+                    if c == 0:
+                        ax.set_ylabel(_metric_ylabel(metric))
+
+                for idx in range(len(models), n_rows * n_cols):
+                    r = idx // n_cols
+                    c = idx % n_cols
+                    axes[r, c].axis("off")
+
+                handles = [
+                    plt.Line2D(
+                        [0],
+                        [0],
+                        color=sns.desaturate(NOISE_PALETTE[i % len(NOISE_PALETTE)], 0.82),
+                        marker=markers[i % len(markers)],
+                        linestyle="-",
+                        linewidth=1.8,
+                        markersize=3.8,
+                        alpha=0.9,
+                        markeredgecolor="white",
+                        markeredgewidth=0.6,
+                    )
+                    for i, _ in enumerate(noises)
+                ]
+                fig.legend(
+                    handles,
+                    noises,
+                    loc="upper center",
+                    ncol=min(5, len(noises)),
+                    frameon=False,
+                    bbox_to_anchor=(0.5, 1.0),
+                )
+                fig.tight_layout(rect=[0, 0, 1, 0.93])
+                out_pdf = ds_dir / f"{_slugify(ds)}_{metric_slug}_line_gallery_{prompt_slug}_by_model.pdf"
+                fig.savefig(out_pdf, format="pdf")
+                plt.close(fig)
+                output_paths[f"{ds}|{prompt_mode}"] = out_pdf
+
+        return output_paths
+
     def generate_all(self) -> Dict[str, Any]:
         """Generate all visualizations and return paths."""
         results = {}
@@ -1334,6 +1573,9 @@ class ComprehensiveVisualization:
 
         # 9. Prompt-specific grouped-bar galleries by noise type
         results["model_bar_galleries"] = self.plot_model_bar_galleries()
+
+        # 10. Prompt-specific line galleries by model
+        results["noise_line_galleries_by_model"] = self.plot_noise_line_galleries_by_model()
 
         return results
 
