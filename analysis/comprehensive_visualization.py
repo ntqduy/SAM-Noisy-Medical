@@ -24,6 +24,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 import matplotlib.pyplot as plt
+import matplotlib.patheffects as pe
 import numpy as np
 import pandas as pd
 import seaborn as sns
@@ -38,6 +39,7 @@ from models.wrappers.prompt_utils import resolve_prompt
 # ═══════════════════════════════════════════════════════════════════════════
 
 METRICS = ["IoU", "Dice", "Recall", "Precision", "F1", "HD"]
+UNIT_INTERVAL_METRICS = {"IoU", "Dice", "Recall", "Precision", "F1"}
 
 METRIC_HIGHER_IS_BETTER: Dict[str, bool] = {
     "IoU": True,
@@ -76,6 +78,11 @@ def _slugify(name: str) -> str:
     """Convert name to filename-safe slug."""
     out = re.sub(r"[^A-Za-z0-9]+", "_", str(name).strip().lower())
     return out.strip("_") or "item"
+
+
+def _safe_image_id(image_id: str) -> str:
+    """Match artifact-safe image ID formatting from stage-1 saving."""
+    return re.sub(r"[^A-Za-z0-9_.-]+", "_", str(image_id))
 
 
 def _prompt_display(mode: str) -> str:
@@ -179,6 +186,9 @@ class ComprehensiveVisualization:
         for col in ["dataset", "model", "prompt_mode", "noise_type", "noise_level"]:
             if col in df.columns:
                 df[col] = df[col].astype(str).str.strip()
+        if "image_id" in df.columns:
+            df["image_id"] = df["image_id"].astype(str).str.strip()
+            df["image_id_safe"] = df["image_id"].map(_safe_image_id)
 
         # Add derived columns
         if "noise_level" in df.columns:
@@ -339,6 +349,51 @@ class ComprehensiveVisualization:
             / f"{sample_id}_pred.png"
         )
         return path if path.exists() else None
+
+    def _sample_metric_value(
+        self,
+        dataset: str,
+        model: str,
+        prompt_mode: str,
+        noise: str,
+        level: str,
+        sample_id: str,
+        *,
+        metric: str = "Dice",
+        seed: Optional[int] = 0,
+    ) -> Optional[float]:
+        """Lookup one metric value for a concrete sample/prompt/noise/model case."""
+        if metric not in self.df.columns:
+            return None
+
+        sub = self.df[
+            (self.df["dataset"] == str(dataset))
+            & (self.df["model"] == str(model))
+            & (self.df["prompt_mode"] == str(prompt_mode))
+            & (self.df["noise_type"] == str(noise))
+            & (self.df["noise_level"] == str(level))
+        ]
+        if sub.empty:
+            return None
+
+        if "noise_seed" in sub.columns and seed is not None:
+            seed_sub = sub[pd.to_numeric(sub["noise_seed"], errors="coerce") == int(seed)]
+            if not seed_sub.empty:
+                sub = seed_sub
+
+        if "image_id_safe" in sub.columns:
+            sub = sub[sub["image_id_safe"] == _safe_image_id(sample_id)]
+        elif "image_id" in sub.columns:
+            image_id_series = sub["image_id"].astype(str)
+            sub = sub[image_id_series == str(sample_id)]
+
+        if sub.empty:
+            return None
+
+        vals = pd.to_numeric(sub[metric], errors="coerce").dropna()
+        if vals.empty:
+            return None
+        return float(vals.mean())
 
     def plot_prompt_schematic(self) -> Path:
         """
@@ -905,11 +960,17 @@ class ComprehensiveVisualization:
                 headers = ["Original", f"Noisy {target_level}", "GT"] + models
                 n_rows = len(rows)
                 n_cols = len(headers)
-                fig_w = max(12.0, 2.3 * n_cols)
+                fig_w = max(12.0, 2.55 * n_cols)
                 fig_h = max(5.0, 2.2 * n_rows)
-                fig, axes = plt.subplots(n_rows, n_cols, figsize=(fig_w, fig_h), squeeze=False)
+                fig, axes = plt.subplots(
+                    n_rows,
+                    n_cols,
+                    figsize=(fig_w, fig_h),
+                    squeeze=False,
+                    gridspec_kw={"wspace": 0.03, "hspace": 0.12},
+                )
 
-                for r, (noise, _, original_path, noisy_path, gt_path, pred_paths) in enumerate(rows):
+                for r, (noise, sample_id, original_path, noisy_path, gt_path, pred_paths) in enumerate(rows):
                     cell_paths: List[Optional[Path]] = [original_path, noisy_path, gt_path] + [
                         pred_paths.get(model) for model in models
                     ]
@@ -922,12 +983,29 @@ class ComprehensiveVisualization:
                             ax.text(0.5, 0.5, "N/A", ha="center", va="center", fontsize=7)
                         ax.set_xticks([])
                         ax.set_yticks([])
-                        if r == 0:
+                        if r == 0 and c < 3:
                             ax.set_xlabel(headers[c], fontsize=9)
                         if c == 0:
                             ax.set_ylabel(str(noise), fontsize=9, rotation=90, va="center")
+                        if c >= 3:
+                            model = models[c - 3]
+                            dice = self._sample_metric_value(
+                                ds,
+                                model,
+                                prompt_mode,
+                                noise,
+                                target_level,
+                                sample_id,
+                                metric="Dice",
+                                seed=seed,
+                            )
+                            if dice is None or not np.isfinite(dice):
+                                label = f"{model}\n(Dice: N/A)"
+                            else:
+                                label = f"{model}\n(Dice: {dice:.3f})"
+                            ax.set_xlabel(label, fontsize=8, labelpad=2)
 
-                fig.tight_layout()
+                fig.subplots_adjust(left=0.035, right=0.995, top=0.995, bottom=0.035, wspace=0.03, hspace=0.12)
                 out_pdf = (
                     ds_dir
                     / f"{_slugify(ds)}_segmentation_gallery_{prompt_slug}_{target_level}_by_noise.pdf"
@@ -985,6 +1063,8 @@ class ComprehensiveVisualization:
                     sharey=True,
                 )
                 level_to_x = {lv: i for i, lv in enumerate(levels)}
+                line_styles = ["-", "--", "-.", ":"]
+                markers = ["o", "s", "^", "D", "P", "X", "v", "<", ">", "h"]
 
                 for idx, noise in enumerate(noises):
                     r = idx // n_cols
@@ -1003,15 +1083,24 @@ class ComprehensiveVisualization:
                             continue
                         xs = [level_to_x[str(lv)] for lv in g["noise_level"]]
                         ys = g[metric].astype(float).tolist()
-                        ax.plot(
+                        color = sns.desaturate(MODEL_PALETTE[model_idx % len(MODEL_PALETTE)], 0.78)
+                        line, = ax.plot(
                             xs,
                             ys,
-                            marker="o",
-                            linewidth=1.5,
-                            markersize=3.5,
-                            color=MODEL_PALETTE[model_idx % len(MODEL_PALETTE)],
+                            marker=markers[model_idx % len(markers)],
+                            linestyle=line_styles[model_idx % len(line_styles)],
+                            linewidth=1.7,
+                            markersize=4.0,
+                            color=color,
+                            alpha=0.84,
+                            markeredgecolor="white",
+                            markeredgewidth=0.6,
                             label=model,
                         )
+                        line.set_path_effects([
+                            pe.Stroke(linewidth=2.8, foreground="white", alpha=0.65),
+                            pe.Normal(),
+                        ])
 
                     ax.text(
                         0.03,
@@ -1025,8 +1114,11 @@ class ComprehensiveVisualization:
                     )
                     ax.set_xticks(range(len(levels)))
                     ax.set_xticklabels(levels, rotation=30, ha="right")
-                    ax.grid(True, alpha=0.25)
-                    ax.set_ylim(bottom=0)
+                    ax.grid(True, alpha=0.18, linewidth=0.5)
+                    if metric in UNIT_INTERVAL_METRICS:
+                        ax.set_ylim(0.0, 1.0)
+                    else:
+                        ax.set_ylim(bottom=0)
                     if r == n_rows - 1:
                         ax.set_xlabel("Noise Level")
                     if c == 0:
@@ -1041,10 +1133,14 @@ class ComprehensiveVisualization:
                     plt.Line2D(
                         [0],
                         [0],
-                        color=MODEL_PALETTE[i % len(MODEL_PALETTE)],
-                        marker="o",
-                        linewidth=1.5,
-                        markersize=3.5,
+                        color=sns.desaturate(MODEL_PALETTE[i % len(MODEL_PALETTE)], 0.78),
+                        marker=markers[i % len(markers)],
+                        linestyle=line_styles[i % len(line_styles)],
+                        linewidth=1.7,
+                        markersize=4.0,
+                        alpha=0.84,
+                        markeredgecolor="white",
+                        markeredgewidth=0.6,
                     )
                     for i, _ in enumerate(models)
                 ]
