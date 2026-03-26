@@ -960,14 +960,14 @@ class ComprehensiveVisualization:
                 headers = ["Original", f"Noisy {target_level}", "GT"] + models
                 n_rows = len(rows)
                 n_cols = len(headers)
-                fig_w = max(14.0, 3.05 * n_cols)
-                fig_h = max(4.8, 2.45 * n_rows)
+                fig_w = max(13.5, 2.85 * n_cols)
+                fig_h = max(5.4, 2.75 * n_rows)
                 fig, axes = plt.subplots(
                     n_rows,
                     n_cols,
                     figsize=(fig_w, fig_h),
                     squeeze=False,
-                    gridspec_kw={"wspace": 0.015, "hspace": 0.06},
+                    gridspec_kw={"wspace": 0.01, "hspace": 0.1},
                 )
 
                 for r, (noise, sample_id, original_path, noisy_path, gt_path, pred_paths) in enumerate(rows):
@@ -984,9 +984,29 @@ class ComprehensiveVisualization:
                         ax.set_xticks([])
                         ax.set_yticks([])
                         if r == 0 and c < 3:
-                            ax.set_xlabel(headers[c], fontsize=9)
+                            ax.text(
+                                0.03,
+                                0.96,
+                                headers[c],
+                                transform=ax.transAxes,
+                                ha="left",
+                                va="top",
+                                fontsize=8.2,
+                                color="white",
+                                bbox=dict(facecolor="black", edgecolor="none", alpha=0.58, pad=1.4),
+                            )
                         if c == 0:
-                            ax.set_ylabel(str(noise), fontsize=9, rotation=90, va="center", labelpad=2)
+                            ax.text(
+                                0.03,
+                                0.04,
+                                str(noise),
+                                transform=ax.transAxes,
+                                ha="left",
+                                va="bottom",
+                                fontsize=7.8,
+                                color="white",
+                                bbox=dict(facecolor="black", edgecolor="none", alpha=0.58, pad=1.4),
+                            )
                         if c >= 3:
                             model = models[c - 3]
                             dice = self._sample_metric_value(
@@ -1010,12 +1030,12 @@ class ComprehensiveVisualization:
                                 transform=ax.transAxes,
                                 ha="left",
                                 va="bottom",
-                                fontsize=7.6,
+                                fontsize=7.1,
                                 color="white",
                                 bbox=dict(facecolor="black", edgecolor="none", alpha=0.58, pad=1.6),
                             )
 
-                fig.subplots_adjust(left=0.022, right=0.997, top=0.995, bottom=0.022, wspace=0.015, hspace=0.06)
+                fig.subplots_adjust(left=0.01, right=0.998, top=0.995, bottom=0.015, wspace=0.01, hspace=0.1)
                 out_pdf = (
                     ds_dir
                     / f"{_slugify(ds)}_segmentation_gallery_{prompt_slug}_{target_level}_by_noise.pdf"
