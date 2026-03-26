@@ -66,6 +66,7 @@ class MetricPlotter:
                 ax.set_ylabel(metric)
                 ax.set_title(f"{metric} vs noise level | {dataset} | {model} | {prompt_mode}")
                 ax.grid(True, alpha=0.25)
+                ax.set_ylim(bottom=0)
                 ax.legend(loc="best", fontsize=8)
                 fig.tight_layout()
                 pdf.savefig(fig)
@@ -131,4 +132,3 @@ def generate_metric_curves(stats_csv: Path, out_pdf: Path, metric: str = "Dice")
 def generate_robustness_plot(stats_csv: Path, out_pdf: Path, metric: str = "Dice") -> Path:
     plotter = MetricPlotter(stats_csv, out_pdf.parent)
     return plotter.plot_robustness(metric, out_pdf.name)
-

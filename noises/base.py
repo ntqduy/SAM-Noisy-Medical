@@ -72,7 +72,10 @@ def compute_ssim(clean: np.ndarray, noisy: np.ndarray) -> float:
     """Compute Structural Similarity Index (simplified version)."""
     try:
         from skimage.metrics import structural_similarity as ssim
-        return float(ssim(clean, noisy, data_range=255))
+        kwargs = {"data_range": 255}
+        if np.asarray(clean).ndim == 3:
+            kwargs["channel_axis"] = -1
+        return float(ssim(clean, noisy, **kwargs))
     except ImportError:
         # Fallback: simplified SSIM approximation
         clean = clean.astype(np.float64)
@@ -87,6 +90,22 @@ def compute_ssim(clean: np.ndarray, noisy: np.ndarray) -> float:
         sigma_y = np.std(noisy)
         sigma_xy = np.mean((clean - mu_x) * (noisy - mu_y))
         
+        ssim_val = ((2 * mu_x * mu_y + c1) * (2 * sigma_xy + c2)) / \
+                   ((mu_x ** 2 + mu_y ** 2 + c1) * (sigma_x ** 2 + sigma_y ** 2 + c2))
+        return float(ssim_val)
+    except Exception:
+        clean = clean.astype(np.float64)
+        noisy = noisy.astype(np.float64)
+
+        c1 = (0.01 * 255) ** 2
+        c2 = (0.03 * 255) ** 2
+
+        mu_x = np.mean(clean)
+        mu_y = np.mean(noisy)
+        sigma_x = np.std(clean)
+        sigma_y = np.std(noisy)
+        sigma_xy = np.mean((clean - mu_x) * (noisy - mu_y))
+
         ssim_val = ((2 * mu_x * mu_y + c1) * (2 * sigma_xy + c2)) / \
                    ((mu_x ** 2 + mu_y ** 2 + c1) * (sigma_x ** 2 + sigma_y ** 2 + c2))
         return float(ssim_val)
@@ -129,14 +148,20 @@ class NoiseBase(ABC):
     
     def __call__(self, x: np.ndarray, return_meta: bool = False) -> NoiseResult:
         """
-        Apply noise and return NoiseResult with full metadata.
-        
-        Args:
-            x: Clean input image (uint8)
-            return_meta: If True, return NoiseResult; else return just image (legacy)
-            
-        Returns:
-            NoiseResult with noisy image and metadata
+        Apply noise and return ``NoiseResult`` with full metadata.
+
+        Parameters
+        ----------
+        x : np.ndarray
+            Clean input image, typically uint8 in [0, 255].
+        return_meta : bool, optional
+            Deprecated compatibility flag. The method always returns
+            ``NoiseResult`` in the current framework.
+
+        Returns
+        -------
+        NoiseResult
+            Structured result containing ``noisy_image`` and metadata.
         """
         clean = x.copy()
         applied = False

@@ -31,7 +31,14 @@ class MotionBlur(NoiseBase):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self._noise_type = "motion_blur"
-    
+
+    def get_severity_scalar(self) -> float:
+        """Normalize severity using the effective odd-sized kernel."""
+        min_k, max_k = self.PARAM_RANGES["k"]
+        k = max(3, int(self.params.get("k", 9)) | 1)
+        normalized = (k - min_k) / (max_k - min_k)
+        return float(np.clip(normalized, 0.0, 1.0))
+
     def apply(self, x: np.ndarray) -> np.ndarray:
         k = int(self.params.get("k", 9))
         angle = float(self.params.get("angle", 15.0))

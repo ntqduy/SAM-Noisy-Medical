@@ -28,6 +28,9 @@ import numpy as np
 import pandas as pd
 import seaborn as sns
 from matplotlib.backends.backend_pdf import PdfPages
+from PIL import Image
+
+from models.wrappers.prompt_utils import resolve_prompt
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -106,6 +109,27 @@ def _metric_ylabel(metric: str) -> str:
 # ═══════════════════════════════════════════════════════════════════════════
 #  COMPREHENSIVE VISUALIZATION SUITE
 # ═══════════════════════════════════════════════════════════════════════════
+
+def _read_uint8_image(path: Path) -> np.ndarray:
+    """Load an image and normalize it to uint8 for consistent plotting."""
+    arr = np.asarray(Image.open(path))
+    if arr.ndim == 3 and arr.shape[2] == 4:
+        arr = arr[..., :3]
+    if arr.dtype == np.uint8:
+        return arr
+    arr = arr.astype(np.float32)
+    if arr.size and float(arr.max()) <= 1.0:
+        arr = arr * 255.0
+    return np.clip(arr, 0, 255).astype(np.uint8)
+
+
+def _read_binary_mask(path: Path) -> np.ndarray:
+    """Load a binary mask from disk as uint8 {0,1}."""
+    arr = _read_uint8_image(path)
+    if arr.ndim == 3:
+        arr = arr[..., 0]
+    return (arr > 0).astype(np.uint8)
+
 
 class ComprehensiveVisualization:
     """
@@ -197,55 +221,225 @@ class ComprehensiveVisualization:
     #  1. PROMPT MODE SCHEMATIC
     # ─────────────────────────────────────────────────────────────────────────
 
+    def _shared_dataset_dir(self, dataset: str) -> Optional[Path]:
+        """Return dataset-specific shared artifact directory when available."""
+        if self.artifact_root is None:
+            return None
+        ds_dir = self.artifact_root / "_shared" / _slugify(dataset)
+        return ds_dir if ds_dir.exists() else None
+
+    def _find_prompt_sample(self, dataset: str) -> Optional[Dict[str, Any]]:
+        """
+        Pick a real evaluation sample from stage-1 shared artifacts.
+
+        Selection policy is deterministic and tied to the benchmark output:
+        prefer the first clean ``L0/seed0`` sample saved by stage 1, then fall
+        back to the first available shared sample.
+        """
+        ds_dir = self._shared_dataset_dir(dataset)
+        if ds_dir is None:
+            return None
+
+        patterns = [
+            "*/L0/seed0/*_original.png",
+            "*/L0/seed*/*_original.png",
+            "*/*/seed*/*_original.png",
+        ]
+        for pattern in patterns:
+            for original_path in sorted(ds_dir.glob(pattern)):
+                sample_id = original_path.stem.replace("_original", "")
+                gt_path = original_path.with_name(f"{sample_id}_gt.png")
+                noisy_path = original_path.with_name(f"{sample_id}_noisy.png")
+                if not gt_path.exists():
+                    continue
+                rel = original_path.relative_to(ds_dir)
+                return {
+                    "sample_id": sample_id,
+                    "original_path": original_path,
+                    "gt_path": gt_path,
+                    "noisy_path": noisy_path if noisy_path.exists() else None,
+                    "noise_type": rel.parts[0] if len(rel.parts) >= 1 else "",
+                    "noise_level": rel.parts[1] if len(rel.parts) >= 2 else "",
+                    "seed_dir": rel.parts[2] if len(rel.parts) >= 3 else "",
+                }
+        return None
+
+    def _shared_noise_level_map(
+        self,
+        dataset: str,
+        noise: str,
+        *,
+        suffix: str,
+    ) -> Dict[str, Dict[str, Path]]:
+        """Map sample_id -> level -> shared artifact path for one dataset/noise."""
+        ds_dir = self._shared_dataset_dir(dataset)
+        if ds_dir is None:
+            return {}
+
+        noise_dir = ds_dir / _slugify(noise)
+        if not noise_dir.exists():
+            return {}
+
+        mapping: Dict[str, Dict[str, Path]] = {}
+        for path in sorted(noise_dir.glob(f"*/seed*/*_{suffix}.png")):
+            rel = path.relative_to(noise_dir)
+            if len(rel.parts) < 3:
+                continue
+            level = rel.parts[0]
+            sample_id = path.stem.replace(f"_{suffix}", "")
+            mapping.setdefault(sample_id, {})[level] = path
+        return mapping
+
+    @staticmethod
+    def _best_sample_id(level_map: Dict[str, Dict[str, Path]], levels: List[str]) -> Optional[str]:
+        """Choose one consistent sample that maximizes level coverage."""
+        best_sample_id: Optional[str] = None
+        best_cov = -1
+        for sample_id in sorted(level_map):
+            coverage = sum(1 for lv in levels if lv in level_map[sample_id])
+            if coverage > best_cov:
+                best_cov = coverage
+                best_sample_id = sample_id
+        return best_sample_id
+
     def plot_prompt_schematic(self) -> Path:
         """
         Generate schematic illustration of 3 prompt modes.
-        Uses synthetic example to show point, bbox, point+bbox.
+        Reuses a real stage-1 sample when shared artifacts are available.
         """
         out_dir = self.output_dir / "schematics"
         out_dir.mkdir(parents=True, exist_ok=True)
         out_pdf = out_dir / "prompt_modes_illustration_point_bbox_pointbox.pdf"
 
-        size = 256
-        bg = np.full((size, size), 60, dtype=np.uint8)
+        modes = [
+            ("point", "prompt_point"),
+            ("bbox", "prompt_bbox"),
+            ("point+bbox", "prompt_point_box"),
+        ]
+        pages_written = 0
 
-        # Synthetic foreground mask (off-center ellipse)
-        yy, xx = np.ogrid[:size, :size]
-        fg = (((xx - 100)**2) / 50**2 + ((yy - 130)**2) / 35**2) <= 1.0
-        bg[fg] = 160
+        with PdfPages(out_pdf) as pdf:
+            for dataset in self._datasets():
+                sample = self._find_prompt_sample(dataset)
+                if sample is None:
+                    continue
 
-        # Get bounding box
-        ys, xs = np.where(fg)
-        x0, y0, x1, y1 = xs.min(), ys.min(), xs.max(), ys.max()
+                image = _read_uint8_image(sample["original_path"])
+                gt_mask = _read_binary_mask(sample["gt_path"])
+                if image.shape[:2] != gt_mask.shape[:2]:
+                    continue
 
-        # Center point
-        cx, cy = (x0 + x1) // 2, (y0 + y1) // 2
+                fig, axes = plt.subplots(1, 3, figsize=(9.4, 3.2))
+                for ax, (display_label, prompt_mode) in zip(axes, modes):
+                    resolved = resolve_prompt(
+                        {"gt_mask": gt_mask},
+                        image.shape[:2],
+                        prompt_mode=prompt_mode,
+                    )
 
-        fig, axes = plt.subplots(1, 3, figsize=(9, 3))
+                    if image.ndim == 2:
+                        ax.imshow(image, cmap="gray", vmin=0, vmax=255)
+                    else:
+                        ax.imshow(image)
 
-        for idx, (ax, mode_name) in enumerate(zip(axes, ["point", "bbox", "point+bbox"])):
-            ax.imshow(bg, cmap="gray", vmin=0, vmax=255)
+                    bbox = resolved.get("bbox")
+                    if bbox is not None:
+                        x0, y0, x1, y1 = [int(v) for v in bbox]
+                        rect = plt.Rectangle(
+                            (x0, y0),
+                            max(1, x1 - x0 + 1),
+                            max(1, y1 - y0 + 1),
+                            fill=False,
+                            linewidth=2.0,
+                            edgecolor="#E67E22",
+                        )
+                        ax.add_patch(rect)
 
-            # Draw bbox for bbox and point+bbox modes
-            if mode_name in ["bbox", "point+bbox"]:
-                rect = plt.Rectangle(
-                    (x0, y0), x1 - x0, y1 - y0,
-                    fill=False, linewidth=2, edgecolor="#E67E22"
+                    pts = resolved.get("points")
+                    if pts is not None and np.asarray(pts).size > 0:
+                        pts_arr = np.asarray(pts, dtype=np.int32).reshape(-1, 2)
+                        ax.scatter(
+                            pts_arr[:, 0],
+                            pts_arr[:, 1],
+                            c="#1F77B4",
+                            s=40,
+                            marker="o",
+                            edgecolors="white",
+                            linewidths=0.8,
+                            zorder=5,
+                        )
+
+                    ax.set_xticks([])
+                    ax.set_yticks([])
+                    ax.set_xlabel(display_label, fontsize=11, fontweight="bold")
+
+                fig.text(
+                    0.5,
+                    0.01,
+                    f"dataset={dataset} | sample={sample['sample_id']} | source=stage1 shared artifact",
+                    ha="center",
+                    va="bottom",
+                    fontsize=7.5,
                 )
-                ax.add_patch(rect)
+                fig.tight_layout(rect=[0, 0.04, 1, 1])
+                pdf.savefig(fig)
+                plt.close(fig)
+                pages_written += 1
 
-            # Draw point for point and point+bbox modes
-            if mode_name in ["point", "point+bbox"]:
-                ax.scatter([cx], [cy], c="#1F77B4", s=50, marker="o",
-                           edgecolors="white", linewidths=0.8, zorder=5)
-
-            ax.set_xticks([])
-            ax.set_yticks([])
-            ax.set_xlabel(mode_name, fontsize=11, fontweight="bold")
-
-        fig.tight_layout()
-        fig.savefig(out_pdf, format="pdf")
-        plt.close(fig)
+            if pages_written == 0:
+                size = 256
+                bg = np.full((size, size), 60, dtype=np.uint8)
+                yy, xx = np.ogrid[:size, :size]
+                fg = (((xx - 100) ** 2) / 50**2 + ((yy - 130) ** 2) / 35**2) <= 1.0
+                bg[fg] = 160
+                gt_mask = fg.astype(np.uint8)
+                fig, axes = plt.subplots(1, 3, figsize=(9.4, 3.2))
+                for ax, (display_label, prompt_mode) in zip(axes, modes):
+                    resolved = resolve_prompt(
+                        {"gt_mask": gt_mask},
+                        bg.shape[:2],
+                        prompt_mode=prompt_mode,
+                    )
+                    ax.imshow(bg, cmap="gray", vmin=0, vmax=255)
+                    bbox = resolved.get("bbox")
+                    if bbox is not None:
+                        x0, y0, x1, y1 = [int(v) for v in bbox]
+                        rect = plt.Rectangle(
+                            (x0, y0),
+                            max(1, x1 - x0 + 1),
+                            max(1, y1 - y0 + 1),
+                            fill=False,
+                            linewidth=2.0,
+                            edgecolor="#E67E22",
+                        )
+                        ax.add_patch(rect)
+                    pts = resolved.get("points")
+                    if pts is not None and np.asarray(pts).size > 0:
+                        pts_arr = np.asarray(pts, dtype=np.int32).reshape(-1, 2)
+                        ax.scatter(
+                            pts_arr[:, 0],
+                            pts_arr[:, 1],
+                            c="#1F77B4",
+                            s=40,
+                            marker="o",
+                            edgecolors="white",
+                            linewidths=0.8,
+                            zorder=5,
+                        )
+                    ax.set_xticks([])
+                    ax.set_yticks([])
+                    ax.set_xlabel(display_label, fontsize=11, fontweight="bold")
+                fig.text(
+                    0.5,
+                    0.01,
+                    "fallback=synthetic (no stage1 shared artifacts available)",
+                    ha="center",
+                    va="bottom",
+                    fontsize=7.5,
+                )
+                fig.tight_layout(rect=[0, 0.04, 1, 1])
+                pdf.savefig(fig)
+                plt.close(fig)
         return out_pdf
 
     # ─────────────────────────────────────────────────────────────────────────
@@ -279,6 +473,8 @@ class ComprehensiveVisualization:
             axes = np.array(axes).reshape(n_rows, n_cols)
 
             for r, noise in enumerate(noises):
+                noise_level_map = self._shared_noise_level_map(ds, noise, suffix="noisy")
+                best_sample_id = self._best_sample_id(noise_level_map, levels)
                 for c, level in enumerate(levels):
                     ax = axes[r, c]
                     ax.set_xticks([])
@@ -287,17 +483,12 @@ class ComprehensiveVisualization:
                     # Try to load actual image from artifacts
                     img_loaded = False
                     if self.artifact_root:
-                        # Pattern: artifacts/_shared/{dataset}/{noise}/{level}/seed*/xxx_noisy.png
-                        pattern = (
-                            self.artifact_root / "_shared" / _slugify(ds) /
-                            _slugify(noise) / level / "seed*" / "*_noisy.png"
-                        )
-                        matches = list(self.artifact_root.glob(
-                            f"_shared/{_slugify(ds)}/{_slugify(noise)}/{level}/seed*/*_noisy.png"
-                        ))
-                        if matches:
+                        path = None
+                        if best_sample_id is not None:
+                            path = noise_level_map.get(best_sample_id, {}).get(level)
+                        if path is not None and path.exists():
                             try:
-                                img = plt.imread(matches[0])
+                                img = _read_uint8_image(path)
                                 ax.imshow(img, cmap="gray" if img.ndim == 2 else None)
                                 img_loaded = True
                             except Exception:
@@ -377,6 +568,7 @@ class ComprehensiveVisualization:
                     ax.set_xticklabels(levels, rotation=30, ha="right")
                     ax.legend(loc="best", frameon=True, fontsize=7, ncol=2)
                     ax.grid(True, alpha=0.3)
+                    ax.set_ylim(bottom=0)
 
                     fig.tight_layout()
                     out_pdf = ds_dir / f"{_slugify(ds)}_{metric_slug}_lineplot_by_level_{mode_slug}.pdf"
@@ -446,6 +638,7 @@ class ComprehensiveVisualization:
                 ax.set_xticklabels(levels, rotation=30, ha="right")
                 ax.legend(loc="best", frameon=True)
                 ax.grid(True, alpha=0.3)
+                ax.set_ylim(bottom=0)
 
                 fig.tight_layout()
                 out_pdf = ds_dir / f"{_slugify(ds)}_{metric_slug}_mode_comparison_all_levels.pdf"
@@ -658,6 +851,8 @@ class ComprehensiveVisualization:
 
             fig, axes = plt.subplots(n_rows, n_cols, figsize=(12, n_rows * 2.5))
             axes = np.array(axes).reshape(n_rows, n_cols)
+            sample_level_map = self._shared_noise_level_map(ds, best_noise, suffix="original")
+            best_sample_id = self._best_sample_id(sample_level_map, levels)
 
             for r, level in enumerate(levels):
                 level_dir = shared_dir / best_noise / level / "seed0"
@@ -670,12 +865,10 @@ class ComprehensiveVisualization:
                     axes[r, 0].set_ylabel(level, fontsize=10)
                     continue
 
-                # Find first sample
-                originals = list(level_dir.glob("*_original.png"))
-                if not originals:
+                if best_sample_id is None:
                     continue
 
-                sample_id = originals[0].stem.replace("_original", "")
+                sample_id = best_sample_id
 
                 img_paths = {
                     "original": level_dir / f"{sample_id}_original.png",
@@ -689,7 +882,7 @@ class ComprehensiveVisualization:
                     ax = axes[r, c]
                     path = img_paths.get(key)
                     if path and path.exists():
-                        img = plt.imread(path)
+                        img = _read_uint8_image(path)
                         ax.imshow(img, cmap="gray" if img.ndim == 2 else None)
                     else:
                         ax.text(0.5, 0.5, "N/A", ha="center", va="center")

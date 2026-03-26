@@ -111,37 +111,17 @@ class RicianNoise(NoiseBase):
             Noisy image with Rician noise applied, same shape as input,
             dtype uint8, clipped to [0, 255].
         """
-        sigma = float(self.params.get("sigma", 20.0))
-
-        # Validate sigma
-        if sigma <= 0:
-            return x.copy()
-
-        # Ensure proper array handling
+        sigma = float(max(0.0, self.params.get("sigma", 20.0)))
         arr = np.asarray(x)
-        original_dtype = arr.dtype
-        original_shape = arr.shape
+        if sigma <= 0.0:
+            return np.clip(arr, 0, 255).astype(np.uint8, copy=True)
 
-        # Convert to float32 for computation
-        x_f = arr.astype(np.float32)
+        x_f = arr.astype(np.float32, copy=False)
 
-        # Generate two independent Gaussian noise fields
-        # n1 affects the real component (added to signal)
-        # n2 affects the imaginary component (pure noise)
-        n1 = self.rng.normal(0.0, sigma, size=original_shape).astype(np.float32)
-        n2 = self.rng.normal(0.0, sigma, size=original_shape).astype(np.float32)
+        # Standard MRI magnitude-noise construction:
+        # M = sqrt((x + n1)^2 + n2^2), with n1, n2 iid N(0, sigma^2).
+        n1 = self.rng.normal(0.0, sigma, size=arr.shape).astype(np.float32)
+        n2 = self.rng.normal(0.0, sigma, size=arr.shape).astype(np.float32)
+        magnitude = np.hypot(x_f + n1, n2)
 
-        # Rician magnitude reconstruction
-        # Real component: R = x + n1
-        # Imaginary component: I = n2
-        # Magnitude: M = sqrt(R² + I²)
-        real_component = x_f + n1
-        imag_component = n2
-
-        # Compute magnitude (inherently non-negative)
-        magnitude = np.sqrt(real_component ** 2 + imag_component ** 2)
-
-        # Clip to valid range and restore dtype
-        noisy = np.clip(magnitude, 0.0, 255.0).astype(np.uint8)
-
-        return noisy
+        return np.clip(magnitude, 0.0, 255.0).astype(np.uint8, copy=False)

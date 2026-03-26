@@ -13,13 +13,14 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
-from typing import Dict, Iterable, List, Optional, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import seaborn as sns
 from matplotlib.backends.backend_pdf import PdfPages
+from PIL import Image
 from models.wrappers.prompt_utils import resolve_prompt, normalize_prompt_mode
 
 
@@ -242,6 +243,25 @@ def _read_gray_image(path: Path) -> np.ndarray:
     return np.clip(arr, 0, 255).astype(np.uint8)
 
 
+def _read_uint8_image(path: Path) -> np.ndarray:
+    arr = np.asarray(Image.open(path))
+    if arr.ndim == 3 and arr.shape[2] == 4:
+        arr = arr[..., :3]
+    if arr.dtype == np.uint8:
+        return arr
+    arr = arr.astype(np.float32)
+    if arr.size and float(arr.max()) <= 1.0:
+        arr = arr * 255.0
+    return np.clip(arr, 0, 255).astype(np.uint8)
+
+
+def _read_binary_mask(path: Path) -> np.ndarray:
+    arr = _read_uint8_image(path)
+    if arr.ndim == 3:
+        arr = arr[..., 0]
+    return (arr > 0).astype(np.uint8)
+
+
 class PaperVisualizationSuite:
     """Generate publication-ready benchmark figures from normalized CSV data."""
 
@@ -281,6 +301,31 @@ class PaperVisualizationSuite:
         levels = sorted(sub_df["noise_level"].dropna().astype(str).unique().tolist(), key=_level_key)
         return levels
 
+    def _find_prompt_sample(self, dataset: str) -> Optional[Dict[str, Any]]:
+        if self.artifact_root is None or not self.artifact_root.exists():
+            return None
+        ds_dir = self.artifact_root / "_shared" / _slugify(dataset)
+        if not ds_dir.exists():
+            return None
+
+        patterns = [
+            "*/L0/seed0/*_original.png",
+            "*/L0/seed*/*_original.png",
+            "*/*/seed*/*_original.png",
+        ]
+        for pattern in patterns:
+            for original_path in sorted(ds_dir.glob(pattern)):
+                sample_id = original_path.stem.replace("_original", "")
+                gt_path = original_path.with_name(f"{sample_id}_gt.png")
+                if not gt_path.exists():
+                    continue
+                return {
+                    "sample_id": sample_id,
+                    "original_path": original_path,
+                    "gt_path": gt_path,
+                }
+        return None
+
     # -- 1) prompt schematic ---------------------------------------------------
 
     def plot_prompt_mode_schematic(self) -> Path:
@@ -294,6 +339,146 @@ class PaperVisualizationSuite:
         """
         out_dir = self._dataset_dir("all_datasets")
         out_pdf = out_dir / "schematic_prompt_modes_point_bbox_pointplusbbox.pdf"
+
+        modes = [
+            ("point", "prompt_point"),
+            ("bbox", "prompt_bbox"),
+            ("point+bbox", "prompt_point_box"),
+        ]
+        pages_written = 0
+
+        with PdfPages(out_pdf) as pdf:
+            for dataset in self._detected_datasets():
+                sample = self._find_prompt_sample(dataset)
+                if sample is None:
+                    continue
+
+                image = _read_uint8_image(Path(sample["original_path"]))
+                gt_mask = _read_binary_mask(Path(sample["gt_path"]))
+                if image.shape[:2] != gt_mask.shape[:2]:
+                    continue
+
+                fig, axes = plt.subplots(1, 3, figsize=(9.4, 3.2))
+                for ax, (display_label, prompt_mode) in zip(axes, modes):
+                    resolved = resolve_prompt(
+                        {"gt_mask": gt_mask},
+                        image_shape=image.shape[:2],
+                        prompt_mode=prompt_mode,
+                    )
+                    if image.ndim == 2:
+                        ax.imshow(image, cmap="gray", vmin=0, vmax=255)
+                    else:
+                        ax.imshow(image)
+
+                    bbox = resolved.get("bbox")
+                    if bbox is not None:
+                        x0, y0, x1, y1 = [int(v) for v in bbox]
+                        rect = plt.Rectangle(
+                            (x0, y0),
+                            max(1, x1 - x0 + 1),
+                            max(1, y1 - y0 + 1),
+                            fill=False,
+                            linewidth=2.0,
+                            edgecolor="#E67E22",
+                        )
+                        ax.add_patch(rect)
+
+                    pts = resolved.get("points")
+                    if pts is not None and np.asarray(pts).size > 0:
+                        pts_arr = np.asarray(pts, dtype=np.int32).reshape(-1, 2)
+                        ax.scatter(
+                            pts_arr[:, 0],
+                            pts_arr[:, 1],
+                            c="#1F77B4",
+                            s=40,
+                            marker="o",
+                            edgecolors="white",
+                            linewidths=0.8,
+                            zorder=5,
+                        )
+
+                    ax.set_xticks([])
+                    ax.set_yticks([])
+                    ax.set_xlabel(display_label, fontsize=12, fontweight="bold")
+                    ax.set_title(f"[{prompt_mode}]", fontsize=8, color="gray", style="italic")
+
+                fig.text(
+                    0.5,
+                    0.01,
+                    f"dataset={dataset} | sample={sample['sample_id']} | source=stage1 shared artifact",
+                    ha="center",
+                    va="bottom",
+                    fontsize=7.5,
+                )
+                fig.tight_layout(rect=[0, 0.04, 1, 1])
+                pdf.savefig(fig)
+                plt.close(fig)
+                pages_written += 1
+
+            if pages_written == 0:
+                size = 256
+                yy, xx = np.ogrid[:size, :size]
+                bg = np.full((size, size), 58, dtype=np.uint8)
+                fg = (
+                    ((xx - 100) ** 2) / (52.0**2) + ((yy - 132) ** 2) / (34.0**2) <= 1.0
+                ) | (
+                    ((xx - 148) ** 2) / (28.0**2) + ((yy - 110) ** 2) / (24.0**2) <= 1.0
+                )
+                bg[fg] = 156
+                gt_mask = fg.astype(np.uint8)
+                fig, axes = plt.subplots(1, 3, figsize=(9.4, 3.2))
+                for ax, (display_label, prompt_mode) in zip(axes, modes):
+                    resolved = resolve_prompt(
+                        {"gt_mask": gt_mask},
+                        image_shape=bg.shape[:2],
+                        prompt_mode=prompt_mode,
+                    )
+                    ax.imshow(bg, cmap="gray", vmin=0, vmax=255)
+
+                    bbox = resolved.get("bbox")
+                    if bbox is not None:
+                        x0, y0, x1, y1 = [int(v) for v in bbox]
+                        rect = plt.Rectangle(
+                            (x0, y0),
+                            max(1, x1 - x0 + 1),
+                            max(1, y1 - y0 + 1),
+                            fill=False,
+                            linewidth=2.0,
+                            edgecolor="#E67E22",
+                        )
+                        ax.add_patch(rect)
+
+                    pts = resolved.get("points")
+                    if pts is not None and np.asarray(pts).size > 0:
+                        pts_arr = np.asarray(pts, dtype=np.int32).reshape(-1, 2)
+                        ax.scatter(
+                            pts_arr[:, 0],
+                            pts_arr[:, 1],
+                            c="#1F77B4",
+                            s=40,
+                            marker="o",
+                            edgecolors="white",
+                            linewidths=0.8,
+                            zorder=5,
+                        )
+
+                    ax.set_xticks([])
+                    ax.set_yticks([])
+                    ax.set_xlabel(display_label, fontsize=12, fontweight="bold")
+                    ax.set_title(f"[{prompt_mode}]", fontsize=8, color="gray", style="italic")
+
+                fig.text(
+                    0.5,
+                    0.01,
+                    "fallback=synthetic (no stage1 shared artifacts available)",
+                    ha="center",
+                    va="bottom",
+                    fontsize=7.5,
+                )
+                fig.tight_layout(rect=[0, 0.04, 1, 1])
+                pdf.savefig(fig)
+                plt.close(fig)
+        return out_pdf
 
         size = 256
         yy, xx = np.ogrid[:size, :size]
@@ -541,6 +726,7 @@ class PaperVisualizationSuite:
                         ax.set_xticks(np.arange(len(levels)))
                         ax.set_xticklabels(levels, rotation=30, ha="right")
                         ax.grid(True, alpha=0.22, linewidth=0.5)
+                        ax.set_ylim(bottom=0)
 
                 handles = [plt.Line2D([0], [0], color=model_colors[m], marker="o", linewidth=1.3, markersize=3.0) for m in models]
                 fig.legend(handles, models, loc="upper center", ncol=min(6, len(models)), frameon=False, bbox_to_anchor=(0.5, 1.0))
@@ -769,6 +955,7 @@ class PaperVisualizationSuite:
                             )
                             ax.set_ylabel(metric)
                             ax.grid(True, alpha=0.25)
+                            ax.set_ylim(bottom=0)
 
                         axes[-1, 0].set_xlabel("noise level")
                         axes[-1, 0].set_xticks(np.arange(len(levels)))

@@ -64,6 +64,7 @@ class ModelComparisonPlotter:
                 ax.set_ylabel(metric)
                 ax.set_title(f"Model comparison | {dataset} | {prompt_mode} | {noise_type}")
                 ax.grid(True, alpha=0.25)
+                ax.set_ylim(bottom=0)
                 ax.legend(loc="best")
                 fig.tight_layout()
                 pdf.savefig(fig)
@@ -76,4 +77,3 @@ class ModelComparisonPlotter:
 def generate_model_comparison(stats_csv: Path, out_pdf: Path, metric: str = "Dice") -> Path:
     plotter = ModelComparisonPlotter(stats_csv, out_pdf.parent)
     return plotter.plot(metric, out_pdf.name)
-
