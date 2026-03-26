@@ -400,17 +400,8 @@ class PaperVisualizationSuite:
                     ax.set_xticks([])
                     ax.set_yticks([])
                     ax.set_xlabel(display_label, fontsize=12, fontweight="bold")
-                    ax.set_title(f"[{prompt_mode}]", fontsize=8, color="gray", style="italic")
 
-                fig.text(
-                    0.5,
-                    0.01,
-                    f"dataset={dataset} | sample={sample['sample_id']} | source=stage1 shared artifact",
-                    ha="center",
-                    va="bottom",
-                    fontsize=7.5,
-                )
-                fig.tight_layout(rect=[0, 0.04, 1, 1])
+                fig.tight_layout()
                 pdf.savefig(fig)
                 plt.close(fig)
                 pages_written += 1
@@ -465,17 +456,8 @@ class PaperVisualizationSuite:
                     ax.set_xticks([])
                     ax.set_yticks([])
                     ax.set_xlabel(display_label, fontsize=12, fontweight="bold")
-                    ax.set_title(f"[{prompt_mode}]", fontsize=8, color="gray", style="italic")
 
-                fig.text(
-                    0.5,
-                    0.01,
-                    "fallback=synthetic (no stage1 shared artifacts available)",
-                    ha="center",
-                    va="bottom",
-                    fontsize=7.5,
-                )
-                fig.tight_layout(rect=[0, 0.04, 1, 1])
+                fig.tight_layout()
                 pdf.savefig(fig)
                 plt.close(fig)
         return out_pdf
@@ -785,7 +767,7 @@ class PaperVisualizationSuite:
                     continue
                 metric_slug = _slugify(metric)
                 prompts = _sorted_prompt_modes(mdf["prompt_mode"].dropna().astype(str).unique().tolist())
-                prompt_groups = [("all_prompts", None)] + [(p, p) for p in prompts]
+                prompt_groups = [(p, p) for p in prompts]
 
                 for prompt_token, prompt_filter in prompt_groups:
                     sub = mdf if prompt_filter is None else mdf[mdf["prompt_mode"] == prompt_filter]

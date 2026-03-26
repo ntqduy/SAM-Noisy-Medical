@@ -62,7 +62,6 @@ class ModelComparisonPlotter:
                 ax.set_xticklabels(tick_labels, fontsize=7)
                 ax.set_xlabel("Noise level")
                 ax.set_ylabel(metric)
-                ax.set_title(f"Model comparison | {dataset} | {prompt_mode} | {noise_type}")
                 ax.grid(True, alpha=0.25)
                 ax.set_ylim(bottom=0)
                 ax.legend(loc="best")

@@ -160,10 +160,9 @@ class PromptComparisonPlotter:
                             zorder=5,
                         )
 
-                    ax.set_title(label)
+                    ax.text(0.5, -0.06, label, transform=ax.transAxes, ha="center", va="top", fontsize=10)
                     ax.axis("off")
 
-                fig.suptitle(f"Prompt modes | {dataset} | {sample['sample_id']}", fontsize=12)
                 fig.tight_layout()
                 pdf.savefig(fig)
                 plt.close(fig)
@@ -205,9 +204,8 @@ class PromptComparisonPlotter:
                             linewidths=0.8,
                             zorder=5,
                         )
-                    ax.set_title(label)
+                    ax.text(0.5, -0.06, label, transform=ax.transAxes, ha="center", va="top", fontsize=10)
                     ax.axis("off")
-                fig.suptitle("Prompt modes (synthetic fallback)", fontsize=12)
                 fig.tight_layout()
                 pdf.savefig(fig)
                 plt.close(fig)
@@ -233,7 +231,6 @@ class PromptComparisonPlotter:
                 )
                 fig, ax = plt.subplots(figsize=(8, 4))
                 ax.bar(summary["prompt_mode"].astype(str), summary[metric].astype(float))
-                ax.set_title(f"Prompt comparison ({metric}) | {dataset} | {model}")
                 ax.set_ylabel(metric)
                 ax.set_xlabel("Prompt mode")
                 ax.grid(True, axis="y", alpha=0.25)
