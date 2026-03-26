@@ -7,8 +7,74 @@
 from __future__ import annotations
 
 import argparse
+import shutil
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+
+
+PROJECT_ROOT = Path(__file__).resolve().parent
+
+
+def _resolve_project_path(path_str: str) -> Path:
+    """Resolve relative config paths against the project root, not the cwd."""
+    path = Path(str(path_str))
+    return path if path.is_absolute() else (PROJECT_ROOT / path).resolve()
+
+
+def _canonicalize_out_root(cfg: Dict[str, Any]) -> None:
+    """Make exp.out_root stable regardless of the shell's current directory."""
+    exp_cfg = cfg.setdefault("exp", {})
+    out_root = _resolve_project_path(str(exp_cfg.get("out_root", "outputs")))
+    exp_cfg["out_root"] = str(out_root)
+
+
+def _legacy_exp_dir_candidates(exp_dir: Path) -> List[Path]:
+    """Return likely legacy experiment directories for previously nested outputs."""
+    candidates: List[Path] = []
+    try:
+        rel = exp_dir.relative_to(PROJECT_ROOT)
+    except ValueError:
+        return candidates
+
+    legacy = (PROJECT_ROOT / "outputs" / rel).resolve()
+    if legacy != exp_dir:
+        candidates.append(legacy)
+    return candidates
+
+
+def _has_raw_outputs(exp_dir: Path) -> bool:
+    return any(exp_dir.glob("*/*/*_raw.csv"))
+
+
+def _find_existing_exp_dir(exp_dir: Path, *, require: str) -> Path:
+    """
+    Find the best available experiment directory.
+
+    This keeps compatibility with old runs where `out_root: outputs` was
+    interpreted from inside the outer `outputs/` folder, producing
+    `outputs/outputs/<experiment>`.
+    """
+    candidates = [exp_dir, *_legacy_exp_dir_candidates(exp_dir)]
+    for candidate in candidates:
+        if require == "merged" and (candidate / "statistics_merged.csv").exists():
+            return candidate
+        if require == "raw" and _has_raw_outputs(candidate):
+            return candidate
+    return exp_dir
+
+
+def _iter_output_paths(value: Any):
+    """Yield Paths from nested dict/list visualization outputs."""
+    if isinstance(value, Path):
+        yield value
+        return
+    if isinstance(value, dict):
+        for child in value.values():
+            yield from _iter_output_paths(child)
+        return
+    if isinstance(value, (list, tuple, set)):
+        for child in value:
+            yield from _iter_output_paths(child)
 
 
 # ── stage runners ────────────────────────────────────────────────────────
@@ -124,9 +190,33 @@ def _run_stage1_parallel(
 
 def _run_stage1b(cfg: Dict[str, Any], exp_dir: Path):
     from analysis.stats_merger import StatisticsMerger
+    from analysis import generate_comprehensive_statistics
 
     merger = StatisticsMerger()
-    summary = merger.run(exp_dir)
+    source_exp_dir = _find_existing_exp_dir(exp_dir, require="raw")
+    summary = merger.run(source_exp_dir)
+
+    exp_dir.mkdir(parents=True, exist_ok=True)
+    merged_csv = source_exp_dir / "statistics_merged.csv"
+    canonical_merged_csv = exp_dir / "statistics_merged.csv"
+    if merged_csv.exists() and merged_csv != canonical_merged_csv:
+        shutil.copy2(merged_csv, canonical_merged_csv)
+        stage1b_summary = source_exp_dir / "stage1b_summary.csv"
+        if stage1b_summary.exists():
+            shutil.copy2(stage1b_summary, exp_dir / "stage1b_summary.csv")
+    else:
+        canonical_merged_csv = merged_csv
+
+    stats_dir = exp_dir / "statistics"
+    generate_comprehensive_statistics(canonical_merged_csv, stats_dir)
+
+    summary = {
+        **summary,
+        "source_exp_dir": str(source_exp_dir),
+        "output_exp_dir": str(exp_dir),
+        "statistics_dir": str(stats_dir),
+        "merged_statistics_csv": str(canonical_merged_csv),
+    }
     print(f"[Stage1b] Completed: {summary}")
     return summary
 
@@ -139,22 +229,31 @@ def _run_stage2(cfg: Dict[str, Any], exp_dir: Path):
     if not backend_env or backend_env.startswith("module://"):
         os.environ["MPLBACKEND"] = "Agg"
 
-    from viz import PaperVisualizationSuite
+    from analysis import generate_comprehensive_visualizations
 
-    merged_csv = exp_dir / "statistics_merged.csv"
+    source_exp_dir = _find_existing_exp_dir(exp_dir, require="merged")
+    merged_csv = source_exp_dir / "statistics_merged.csv"
     if not merged_csv.exists():
         raise RuntimeError(
             f"Missing {merged_csv}. Run Stage 1b first."
         )
 
+    output_root = exp_dir / "visualizations"
     artifact_root = exp_dir / "artifacts"
-    pvs = PaperVisualizationSuite(
+    if not artifact_root.exists():
+        artifact_root = source_exp_dir / "artifacts"
+
+    suite_outputs = generate_comprehensive_visualizations(
         merged_csv,
-        output_root=Path("outputs") / "visualizations",
+        output_root,
         artifact_root=artifact_root if artifact_root.exists() else None,
     )
-    suite_outputs = pvs.generate_all()
-    outputs: Dict[str, str] = {k: str(v) for k, v in suite_outputs.items()}
+    generated_files = sorted({str(p) for p in _iter_output_paths(suite_outputs)})
+    outputs: Dict[str, Any] = {
+        "input_exp_dir": str(source_exp_dir),
+        "output_root": str(output_root),
+        "n_generated_files": len(generated_files),
+    }
 
     print("[Stage2] Completed:")
     for key, value in outputs.items():
@@ -215,6 +314,7 @@ def main():
 
     args = parse_args()
     cm = ConfigManager(args.config)
+    _canonicalize_out_root(cm.cfg)
 
     # CLI overrides for device selection
     if args.device is not None:
