@@ -13,3 +13,5 @@ results/
 outputs/
 .vscode/
 .venv/
+*/__pycache__/
+noises/__pycache__/
