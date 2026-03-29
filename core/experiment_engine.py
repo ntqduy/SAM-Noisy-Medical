@@ -28,7 +28,7 @@ import re
 import shutil
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Collection, Dict, List, Optional, Set
 
 import numpy as np
 from PIL import Image
@@ -71,6 +71,16 @@ RAW_COLUMNS = [
     "F1",
     "HD",
 ]
+
+RESUME_KEY_COLUMNS = {
+    "dataset",
+    "model",
+    "prompt_mode",
+    "noise_type",
+    "noise_level",
+    "noise_seed",
+    "image_id",
+}
 
 
 def _slugify(name: str) -> str:
@@ -135,6 +145,137 @@ class NoiseCase:
     noise_type: str
     noise_level: str
     noise_seed: int
+
+
+@dataclass(frozen=True)
+class ProcessedSampleKey:
+    """Unique identifier for a single saved stage-1 inference sample."""
+
+    dataset_name: str
+    image_id: str
+    model_name: str
+    noise_type: str
+    level: str
+    prompt_mode: str
+    noise_seed: int
+
+
+@dataclass(frozen=True)
+class ResumeState:
+    """Tracks whether an existing raw CSV can be reused for resume."""
+
+    processed_keys: Set[ProcessedSampleKey]
+    can_append: bool
+
+
+def _build_processed_sample_key(
+    *,
+    dataset_name: str,
+    image_id: str,
+    model_name: str,
+    noise_type: str,
+    level: str,
+    prompt_mode: str,
+    noise_seed: int,
+) -> ProcessedSampleKey:
+    """Build the canonical resume key for a single sample."""
+    return ProcessedSampleKey(
+        dataset_name=str(dataset_name),
+        image_id=str(image_id),
+        model_name=str(model_name),
+        noise_type=str(noise_type),
+        level=str(level),
+        prompt_mode=str(prompt_mode),
+        noise_seed=int(noise_seed),
+    )
+
+
+def _load_resume_state(output_path: Path) -> ResumeState:
+    """
+    Load processed sample keys from an existing raw CSV.
+
+    The CSV is considered resumable only when it exists, is non-empty, and
+    exposes the columns required to reconstruct a sample identity.
+    """
+    if not output_path.exists() or not output_path.is_file():
+        return ResumeState(processed_keys=set(), can_append=False)
+
+    try:
+        if output_path.stat().st_size == 0:
+            return ResumeState(processed_keys=set(), can_append=False)
+    except OSError:
+        return ResumeState(processed_keys=set(), can_append=False)
+
+    processed_keys: Set[ProcessedSampleKey] = set()
+    try:
+        with output_path.open("r", newline="", encoding="utf-8") as fh:
+            reader = csv.DictReader(fh)
+            fieldnames = set(reader.fieldnames or [])
+            if not RESUME_KEY_COLUMNS.issubset(fieldnames):
+                return ResumeState(processed_keys=set(), can_append=False)
+
+            for row in reader:
+                try:
+                    processed_keys.add(
+                        _build_processed_sample_key(
+                            dataset_name=str(row["dataset"]),
+                            image_id=str(row["image_id"]),
+                            model_name=str(row["model"]),
+                            noise_type=str(row["noise_type"]),
+                            level=str(row["noise_level"]),
+                            prompt_mode=str(row["prompt_mode"]),
+                            noise_seed=int(row["noise_seed"]),
+                        )
+                    )
+                except (KeyError, TypeError, ValueError):
+                    continue
+    except (csv.Error, OSError):
+        return ResumeState(processed_keys=set(), can_append=False)
+
+    return ResumeState(processed_keys=processed_keys, can_append=True)
+
+
+def is_already_processed(
+    *,
+    output_path: Path,
+    processed_keys: Collection[ProcessedSampleKey],
+    dataset_name: str,
+    image_id: str,
+    model_name: str,
+    noise_type: str,
+    level: str,
+    prompt_mode: str,
+    noise_seed: int,
+) -> bool:
+    """
+    Return ``True`` when the expected stage-1 output already exists and is valid.
+
+    In this pipeline, the canonical per-sample output is the row stored in the
+    prompt-specific raw CSV. A sample is therefore resumable when:
+
+    1. the raw CSV exists,
+    2. the file is non-empty, and
+    3. a valid row for the requested sample key is already present.
+    """
+    if not output_path.exists() or not output_path.is_file():
+        return False
+
+    try:
+        if output_path.stat().st_size == 0:
+            return False
+    except OSError:
+        return False
+
+    sample_key = _build_processed_sample_key(
+        dataset_name=dataset_name,
+        image_id=image_id,
+        model_name=model_name,
+        noise_type=noise_type,
+        level=level,
+        prompt_mode=prompt_mode,
+        noise_seed=noise_seed,
+    )
+    return sample_key in processed_keys
 
 
 # ── ExperimentEngine ────────────────────────────────────────────────────
@@ -291,10 +432,16 @@ class ExperimentEngine:
         raw_csv: Path,
         artifact_counts: Dict[str, int],
     ) -> None:
-        with open(raw_csv, "w", newline="", encoding="utf-8") as fh:
-            writer = csv.DictWriter(fh, fieldnames=RAW_COLUMNS)
-            writer.writeheader()
+        resume_state = _load_resume_state(raw_csv)
+        file_mode = "a" if resume_state.can_append else "w"
 
+        with open(raw_csv, file_mode, newline="", encoding="utf-8") as fh:
+            writer = csv.DictWriter(fh, fieldnames=RAW_COLUMNS)
+            if not resume_state.can_append:
+                writer.writeheader()
+                fh.flush()
+
+            processed_keys = set(resume_state.processed_keys)
             total = n_samples * len(noise_cases)
             desc = f"{ds_name}/{mdl_name}/{prompt_mode}"
             pbar = tqdm(total=total, desc=desc, leave=False)
@@ -306,6 +453,33 @@ class ExperimentEngine:
                     image_id = str(
                         sample.get("image_id", sample.get("id", idx))
                     )
+
+                    if is_already_processed(
+                        output_path=raw_csv,
+                        processed_keys=processed_keys,
+                        dataset_name=ds_name,
+                        image_id=image_id,
+                        model_name=mdl_name,
+                        noise_type=case.noise_type,
+                        level=case.noise_level,
+                        prompt_mode=prompt_mode,
+                        noise_seed=case.noise_seed,
+                    ):
+                        tqdm.write(
+                            "SKIP "
+                            f"dataset={ds_name} "
+                            f"model={mdl_name} "
+                            f"prompt={prompt_mode} "
+                            f"noise={case.noise_type} "
+                            f"level={case.noise_level} "
+                            f"seed={case.noise_seed} "
+                            f"image_id={image_id}"
+                        )
+                        pbar.update(1)
+                        step_idx += 1
+                        self._runtime_cache_cleanup(step_idx=step_idx)
+                        continue
+
                     image = np.asarray(sample["image"], dtype=np.uint8)
                     gt_mask = _to_uint8_mask(
                         sample.get("mask", sample.get("gt_mask"))
@@ -337,7 +511,7 @@ class ExperimentEngine:
 
                     m = self.metric_manager.compute(pred_mask, gt_mask)
 
-                    writer.writerow({
+                    row = {
                         "dataset": ds_name,
                         "model": mdl_name,
                         "prompt_mode": prompt_mode,
@@ -351,7 +525,20 @@ class ExperimentEngine:
                         "is_gt_empty": gt_stats["is_empty"],
                         "is_pred_empty": pred_stats["is_empty"],
                         **m,
-                    })
+                    }
+                    writer.writerow(row)
+                    fh.flush()
+                    processed_keys.add(
+                        _build_processed_sample_key(
+                            dataset_name=ds_name,
+                            image_id=image_id,
+                            model_name=mdl_name,
+                            noise_type=case.noise_type,
+                            level=case.noise_level,
+                            prompt_mode=prompt_mode,
+                            noise_seed=case.noise_seed,
+                        )
+                    )
 
                     self._maybe_save_artifacts(
                         artifact_counts=artifact_counts,
