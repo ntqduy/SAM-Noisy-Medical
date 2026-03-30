@@ -28,7 +28,7 @@ The current code also auto-detects older nested runs under `outputs/outputs/...`
 
 `configs/full_benchmark.yaml` currently defines:
 
-- 8 model wrappers: `SAM`, `SAM2`, `SAM3`, `MedSAM`, `MedSAM2`, `MedSAM3`, `SAM-Med2D`, `UltraSAM`
+- 9 model wrappers: `SAM`, `SAM2`, `SAM3`, `MedSAM`, `MedicoSAM`, `MedSAM2`, `MedSAM3`, `SAM-Med2D`, `UltraSAM`
 - 6 datasets in config: `Montgomery`, `BUSI`, `CAMUS`, `TN3K`, `TG3K`, `DDTI`
 - 11 enabled noise types in the full benchmark config:
   `gaussian`, `speckle`, `salt_pepper`, `motion_blur`, `jpeg`, `pixelation`,
@@ -140,6 +140,7 @@ Registered in `core/model_manager.py`:
 - `SAM2`
 - `SAM3`
 - `MEDSAM`, `MEDSAM1`
+- `MEDICOSAM`
 - `MEDSAM2`
 - `MEDSAM3`
 - `SAM-MED2D`

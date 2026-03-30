@@ -15,7 +15,7 @@ exp:
 #  Option 3 – auto N GPUs:    num_gpus: 2
 #  CLI overrides: --device cuda:1   or   --num_gpus 2
 # ─────────────────────────────────────────────────────────────────────────
-device: "cuda"
+device: "cuda:0"
 # devices: ["cuda:0", "cuda:1"]   # uncomment for multi-GPU parallel
 # num_gpus: 2                      # alternative: auto-pick N GPUs
 
@@ -131,6 +131,12 @@ models:
     checkpoint: "weights/medsam_vit_b.pth"
     point_logit_threshold: -1.2
     # Original MedSAM is box-prompt native in this benchmark.
+    prompt_modes: ["prompt_point", "prompt_bbox", "prompt_point_box"]
+
+  - name: "MedicoSAM"
+    runner: "MEDICOSAM"
+    checkpoint: "weights/vit_b_medicosam.pt"
+    model_type: "vit_b"
     prompt_modes: ["prompt_point", "prompt_bbox", "prompt_point_box"]
 
   # MedSAM2 – MedSAM built on SAM2 backbone

@@ -67,6 +67,12 @@ models:
     runner: "MEDSAM1"
     prompt_modes: ["prompt_point", "prompt_bbox", "prompt_point_box"]
 
+  - name: "MedicoSAM"
+    runner: "MEDICOSAM"
+    checkpoint: "weights/vit_b_medicosam.pt"
+    model_type: "vit_b"
+    prompt_modes: ["prompt_point", "prompt_bbox", "prompt_point_box"]
+
 noises:
   - gaussian
   - poisson
