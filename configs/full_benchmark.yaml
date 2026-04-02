@@ -59,6 +59,16 @@ datasets:
     views: ["2CH", "4CH"]
     phases: ["ED", "ES"]
     class_id: 1           # LV endocardium (change to 0 for all foreground)
+  - name: "CAMUS_PNG"
+    adapter: "ImageMaskFolderAdapter"
+    root: "data/CAMUS_PNG"
+    image_dir: "images"
+    mask_dir: "masks"
+    image_exts: [".png"]
+    mask_exts: [".png"]
+    mask:
+      type: "binary_0_255"
+      threshold: 0
 
   # # 4) TN3K – Thyroid Nodule  (trainval+test merged = 3493 images)
   - name: "TN3K"
