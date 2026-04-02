@@ -59,9 +59,10 @@ datasets:
     views: ["2CH", "4CH"]
     phases: ["ED", "ES"]
     class_id: 1           # LV endocardium (change to 0 for all foreground)
-  - name: "CAMUS_PNG"
+  ## 3.1 Data with CAMUS 2D
+  - name: "CAMUS"
     adapter: "ImageMaskFolderAdapter"
-    root: "data/CAMUS_PNG"
+    root: "data/CAMUS"
     image_dir: "images"
     mask_dir: "masks"
     image_exts: [".png"]
