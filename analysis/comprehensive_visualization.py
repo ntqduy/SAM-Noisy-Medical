@@ -38,7 +38,7 @@ from models.wrappers.prompt_utils import resolve_prompt
 # ═══════════════════════════════════════════════════════════════════════════
 #  CONSTANTS & HELPERS
 # ═══════════════════════════════════════════════════════════════════════════
-c
+
 METRICS = ["IoU", "Dice", "Recall", "Precision", "F1", "HD"]
 UNIT_INTERVAL_METRICS = {"IoU", "Dice", "Recall", "Precision", "F1"}
 LINE_PLOT_Y_MARGIN = 0.1
