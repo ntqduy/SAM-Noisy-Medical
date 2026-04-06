@@ -38,9 +38,10 @@ from models.wrappers.prompt_utils import resolve_prompt
 # ═══════════════════════════════════════════════════════════════════════════
 #  CONSTANTS & HELPERS
 # ═══════════════════════════════════════════════════════════════════════════
-
+c
 METRICS = ["IoU", "Dice", "Recall", "Precision", "F1", "HD"]
 UNIT_INTERVAL_METRICS = {"IoU", "Dice", "Recall", "Precision", "F1"}
+LINE_PLOT_Y_MARGIN = 0.1
 
 METRIC_HIGHER_IS_BETTER: Dict[str, bool] = {
     "IoU": True,
@@ -149,6 +150,39 @@ def _read_binary_mask(path: Path) -> np.ndarray:
     if arr.ndim == 3:
         arr = arr[..., 0]
     return (arr > 0).astype(np.uint8)
+
+
+def _collect_finite_values(*series_groups: Any) -> List[float]:
+    """Flatten numeric series and keep only finite values."""
+    values: List[float] = []
+    for series in series_groups:
+        arr = np.asarray(series, dtype=float).ravel()
+        if arr.size == 0:
+            continue
+        values.extend(arr[np.isfinite(arr)].tolist())
+    return values
+
+
+def _line_y_lower_bound(*series_groups: Any, margin: float = LINE_PLOT_Y_MARGIN) -> float:
+    """Return a dynamic lower bound based on the plotted values."""
+    values = _collect_finite_values(*series_groups)
+    if not values:
+        return 0.0
+    return max(0.0, min(values) - margin)
+
+
+def _set_line_y_axis(
+    ax: Any,
+    *series_groups: Any,
+    top: Optional[float] = None,
+    margin: float = LINE_PLOT_Y_MARGIN,
+) -> None:
+    """Apply the dynamic line-chart y-axis lower bound."""
+    bottom = _line_y_lower_bound(*series_groups, margin=margin)
+    if top is not None and top > bottom:
+        ax.set_ylim(bottom=bottom, top=top)
+    else:
+        ax.set_ylim(bottom=bottom)
 
 
 class ComprehensiveVisualization:
@@ -698,6 +732,7 @@ class ComprehensiveVisualization:
 
                     # Create figure
                     fig, ax = plt.subplots(figsize=(10, 5))
+                    plotted_y_values: List[float] = []
 
                     for i, model in enumerate(models):
                         g = agg[agg["model"] == model].sort_values("level_idx")
@@ -705,6 +740,7 @@ class ComprehensiveVisualization:
                             continue
                         xs = [level_to_x[str(lv)] for lv in g["noise_level"]]
                         ys = g[metric].tolist()
+                        plotted_y_values.extend(ys)
                         ax.plot(xs, ys, marker="o", linewidth=1.5, markersize=4,
                                 color=MODEL_PALETTE[i % len(MODEL_PALETTE)], label=model)
 
@@ -714,7 +750,8 @@ class ComprehensiveVisualization:
                     ax.set_xticklabels(levels, rotation=30, ha="right")
                     ax.legend(loc="best", frameon=True, fontsize=7, ncol=2)
                     ax.grid(True, alpha=0.3)
-                    ax.set_ylim(bottom=0)
+                    if plotted_y_values:
+                        _set_line_y_axis(ax, plotted_y_values)
 
                     fig.tight_layout()
                     out_pdf = ds_dir / f"{_slugify(ds)}_{metric_slug}_lineplot_by_level_{mode_slug}.pdf"
@@ -756,6 +793,7 @@ class ComprehensiveVisualization:
                 level_to_x = {lv: i for i, lv in enumerate(levels)}
 
                 fig, ax = plt.subplots(figsize=(9, 5))
+                plotted_y_values: List[float] = []
 
                 for i, mode in enumerate(modes):
                     g = agg[agg["prompt_mode"] == mode].sort_values("level_idx")
@@ -763,7 +801,10 @@ class ComprehensiveVisualization:
                         continue
                     xs = [level_to_x[str(lv)] for lv in g["noise_level"]]
                     ys = g["mean"].tolist()
-                    stds = g["std"].tolist()
+                    stds = g["std"].fillna(0.0).tolist()
+                    lower_band = [y - s for y, s in zip(ys, stds)]
+                    plotted_y_values.extend(ys)
+                    plotted_y_values.extend(lower_band)
 
                     color = MODE_PALETTE[i % len(MODE_PALETTE)]
                     display = _prompt_display(mode)
@@ -773,7 +814,7 @@ class ComprehensiveVisualization:
                     # Add error band
                     ax.fill_between(
                         xs,
-                        [y - s for y, s in zip(ys, stds)],
+                        lower_band,
                         [y + s for y, s in zip(ys, stds)],
                         alpha=0.15, color=color
                     )
@@ -784,7 +825,8 @@ class ComprehensiveVisualization:
                 ax.set_xticklabels(levels, rotation=30, ha="right")
                 ax.legend(loc="best", frameon=True)
                 ax.grid(True, alpha=0.3)
-                ax.set_ylim(bottom=0)
+                if plotted_y_values:
+                    _set_line_y_axis(ax, plotted_y_values)
 
                 fig.tight_layout()
                 out_pdf = ds_dir / f"{_slugify(ds)}_{metric_slug}_mode_comparison_all_levels.pdf"
@@ -1190,6 +1232,7 @@ class ComprehensiveVisualization:
                 )
                 level_to_x = {lv: i for i, lv in enumerate(levels)}
                 markers = ["o", "s", "^", "D", "P", "X", "v", "<", ">", "h"]
+                figure_y_values: List[float] = []
 
                 for idx, noise in enumerate(noises):
                     r = idx // n_cols
@@ -1208,6 +1251,7 @@ class ComprehensiveVisualization:
                             continue
                         xs = [level_to_x[str(lv)] for lv in g["noise_level"]]
                         ys = g[metric].astype(float).tolist()
+                        figure_y_values.extend(ys)
                         color = sns.desaturate(MODEL_PALETTE[model_idx % len(MODEL_PALETTE)], 0.78)
                         line, = ax.plot(
                             xs,
@@ -1240,10 +1284,6 @@ class ComprehensiveVisualization:
                     ax.set_xticks(range(len(levels)))
                     ax.set_xticklabels(levels, rotation=30, ha="right")
                     ax.grid(True, alpha=0.18, linewidth=0.5)
-                    if metric in UNIT_INTERVAL_METRICS:
-                        ax.set_ylim(0.0, 1.0)
-                    else:
-                        ax.set_ylim(bottom=0)
                     if r == n_rows - 1:
                         ax.set_xlabel("Noise Level")
                     if c == 0:
@@ -1253,6 +1293,13 @@ class ComprehensiveVisualization:
                     r = idx // n_cols
                     c = idx % n_cols
                     axes[r, c].axis("off")
+
+                if figure_y_values:
+                    _set_line_y_axis(
+                        axes[0, 0],
+                        figure_y_values,
+                        top=1.0 if metric in UNIT_INTERVAL_METRICS else None,
+                    )
 
                 handles = [
                     plt.Line2D(
@@ -1448,6 +1495,7 @@ class ComprehensiveVisualization:
                 )
                 level_to_x = {lv: i for i, lv in enumerate(levels)}
                 markers = ["o", "s", "^", "D", "P", "X", "v", "<", ">", "h", "*", "p"]
+                figure_y_values: List[float] = []
 
                 for idx, model in enumerate(models):
                     r = idx // n_cols
@@ -1466,6 +1514,7 @@ class ComprehensiveVisualization:
                             continue
                         xs = [level_to_x[str(lv)] for lv in g["noise_level"]]
                         ys = g[metric].astype(float).tolist()
+                        figure_y_values.extend(ys)
                         color = sns.desaturate(NOISE_PALETTE[noise_idx % len(NOISE_PALETTE)], 0.82)
                         line, = ax.plot(
                             xs,
@@ -1498,10 +1547,6 @@ class ComprehensiveVisualization:
                     ax.set_xticks(range(len(levels)))
                     ax.set_xticklabels(levels, rotation=30, ha="right")
                     ax.grid(True, alpha=0.18, linewidth=0.5)
-                    if metric in UNIT_INTERVAL_METRICS:
-                        ax.set_ylim(0.0, 1.0)
-                    else:
-                        ax.set_ylim(bottom=0)
                     if r == n_rows - 1:
                         ax.set_xlabel("Noise Level")
                     if c == 0:
@@ -1511,6 +1556,13 @@ class ComprehensiveVisualization:
                     r = idx // n_cols
                     c = idx % n_cols
                     axes[r, c].axis("off")
+
+                if figure_y_values:
+                    _set_line_y_axis(
+                        axes[0, 0],
+                        figure_y_values,
+                        top=1.0 if metric in UNIT_INTERVAL_METRICS else None,
+                    )
 
                 handles = [
                     plt.Line2D(

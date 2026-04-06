@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Dict, List, Optional
 
 import matplotlib.pyplot as plt
+import numpy as np
 import pandas as pd
 from matplotlib.backends.backend_pdf import PdfPages
 
@@ -23,6 +24,19 @@ def _level_key(level: str) -> int:
 def _sorted_levels(df: pd.DataFrame) -> List[str]:
     levels = sorted(df["noise_level"].dropna().astype(str).unique().tolist(), key=_level_key)
     return levels
+
+
+LINE_PLOT_Y_MARGIN = 0.1
+
+
+def _line_y_lower_bound(values: List[float], margin: float = LINE_PLOT_Y_MARGIN) -> float:
+    arr = np.asarray(values, dtype=float).ravel()
+    if arr.size == 0:
+        return 0.0
+    finite = arr[np.isfinite(arr)]
+    if finite.size == 0:
+        return 0.0
+    return max(0.0, float(finite.min()) - margin)
 
 
 class MetricPlotter:
@@ -54,10 +68,12 @@ class MetricPlotter:
             grouped = df.groupby(["dataset", "model", "prompt_mode"], dropna=False)
             for (dataset, model, prompt_mode), sub in grouped:
                 fig, ax = plt.subplots(figsize=(10, 5))
+                plotted_y_values: List[float] = []
                 for noise_type, g in sub.groupby("noise_type", dropna=False):
                     g = g.sort_values("noise_level", key=lambda s: s.map(_level_key))
                     xs = [level_to_x[str(v)] for v in g["noise_level"].astype(str)]
                     ys = g[metric].astype(float).tolist()
+                    plotted_y_values.extend(ys)
                     ax.plot(xs, ys, marker="o", linewidth=1.8, label=str(noise_type))
                 tick_labels = [format_level_label(lv, self._level_names) for lv in levels]
                 ax.set_xticks(list(level_to_x.values()))
@@ -65,7 +81,8 @@ class MetricPlotter:
                 ax.set_xlabel("Noise level")
                 ax.set_ylabel(metric)
                 ax.grid(True, alpha=0.25)
-                ax.set_ylim(bottom=0)
+                if plotted_y_values:
+                    ax.set_ylim(bottom=_line_y_lower_bound(plotted_y_values))
                 ax.legend(loc="best", fontsize=8)
                 fig.tight_layout()
                 pdf.savefig(fig)

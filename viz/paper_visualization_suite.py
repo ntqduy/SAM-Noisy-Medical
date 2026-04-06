@@ -74,6 +74,39 @@ def _sorted_prompt_modes(values: Iterable[str]) -> List[str]:
     return sorted(vals, key=lambda x: (rank.get(x, 99), x))
 
 
+LINE_PLOT_Y_MARGIN = 0.1
+
+
+def _collect_finite_values(*series_groups: object) -> List[float]:
+    values: List[float] = []
+    for series in series_groups:
+        arr = np.asarray(series, dtype=float).ravel()
+        if arr.size == 0:
+            continue
+        values.extend(arr[np.isfinite(arr)].tolist())
+    return values
+
+
+def _line_y_lower_bound(*series_groups: object, margin: float = LINE_PLOT_Y_MARGIN) -> float:
+    values = _collect_finite_values(*series_groups)
+    if not values:
+        return 0.0
+    return max(0.0, min(values) - margin)
+
+
+def _set_line_y_axis(
+    ax: object,
+    *series_groups: object,
+    top: Optional[float] = None,
+    margin: float = LINE_PLOT_Y_MARGIN,
+) -> None:
+    bottom = _line_y_lower_bound(*series_groups, margin=margin)
+    if top is not None and top > bottom:
+        ax.set_ylim(bottom=bottom, top=top)
+    else:
+        ax.set_ylim(bottom=bottom)
+
+
 def _standardize_column_names(df: pd.DataFrame) -> pd.DataFrame:
     alias_to_canonical = {
         "dataset": "dataset",
@@ -680,6 +713,7 @@ class PaperVisualizationSuite:
 
                 model_colors = {m: palette[i % len(palette)] for i, m in enumerate(models)}
                 x_idx = {lv: i for i, lv in enumerate(levels)}
+                figure_y_values: List[float] = []
                 for r, noise in enumerate(noises):
                     for c, prompt in enumerate(prompts):
                         ax = axes[r, c]
@@ -690,6 +724,7 @@ class PaperVisualizationSuite:
                                 continue
                             xs = [x_idx[str(v)] for v in g["noise_level"].astype(str).tolist()]
                             ys = g["metric_value"].astype(float).tolist()
+                            figure_y_values.extend(ys)
                             ax.plot(xs, ys, marker="o", linewidth=1.3, markersize=3.0, color=model_colors[model], label=model)
                         ax.text(
                             0.02,
@@ -708,7 +743,9 @@ class PaperVisualizationSuite:
                         ax.set_xticks(np.arange(len(levels)))
                         ax.set_xticklabels(levels, rotation=30, ha="right")
                         ax.grid(True, alpha=0.22, linewidth=0.5)
-                        ax.set_ylim(bottom=0)
+
+                if figure_y_values:
+                    _set_line_y_axis(axes[0, 0], figure_y_values)
 
                 handles = [plt.Line2D([0], [0], color=model_colors[m], marker="o", linewidth=1.3, markersize=3.0) for m in models]
                 fig.legend(handles, models, loc="upper center", ncol=min(6, len(models)), frameon=False, bbox_to_anchor=(0.5, 1.0))
@@ -914,6 +951,7 @@ class PaperVisualizationSuite:
                         fig3, axes = plt.subplots(n_rows, 1, figsize=(8.4, fig_h), squeeze=False, sharex=True, sharey=True)
                         prompt_colors = {p: palette_prompts[i % len(palette_prompts)] for i, p in enumerate(prompts)}
                         x_idx = {lv: i for i, lv in enumerate(levels)}
+                        figure_y_values: List[float] = []
 
                         for r, model in enumerate(models):
                             ax = axes[r, 0]
@@ -924,6 +962,7 @@ class PaperVisualizationSuite:
                                     continue
                                 xs = [x_idx[str(v)] for v in g["noise_level"].astype(str).tolist()]
                                 ys = g["metric_value"].astype(float).tolist()
+                                figure_y_values.extend(ys)
                                 ax.plot(xs, ys, marker="o", linewidth=1.3, markersize=3.0, color=prompt_colors[prompt], label=prompt)
                             ax.text(
                                 0.01,
@@ -937,7 +976,9 @@ class PaperVisualizationSuite:
                             )
                             ax.set_ylabel(metric)
                             ax.grid(True, alpha=0.25)
-                            ax.set_ylim(bottom=0)
+
+                        if figure_y_values:
+                            _set_line_y_axis(axes[0, 0], figure_y_values)
 
                         axes[-1, 0].set_xlabel("noise level")
                         axes[-1, 0].set_xticks(np.arange(len(levels)))
