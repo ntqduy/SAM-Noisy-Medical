@@ -347,16 +347,16 @@ protocols:
 
 
 
-    # poisson:
-    #   L1: {p: 1, lam: 80}
-    #   L2: {p: 1, lam: 60}
-    #   L3: {p: 1, lam: 50}
-    #   L4: {p: 1, lam: 30}
-    #   L5: {p: 1, lam: 20}
-    #   L6: {p: 1, lam: 14}
-    #   L7: {p: 1, lam: 10}
-    #   L8: {p: 1, lam: 7}
-    #   L9: {p: 1, lam: 4}
+    poisson:
+      L1: {p: 1, lam: 80}
+      L2: {p: 1, lam: 60}
+      L3: {p: 1, lam: 50}
+      L4: {p: 1, lam: 30}
+      L5: {p: 1, lam: 20}
+      L6: {p: 1, lam: 14}
+      L7: {p: 1, lam: 10}
+      L8: {p: 1, lam: 7}
+      L9: {p: 1, lam: 4}
     # bias_field:
     #   L1: {p: 1, strength: 0.08, smooth: 96}
     #   L2: {p: 1, strength: 0.15, smooth: 96}
