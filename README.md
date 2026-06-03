@@ -115,12 +115,10 @@ Typical files under outputs/full_benchmark/:
 
 - statistics_merged.csv
 - stage1b_summary.csv
-- model_complexity.csv
 - statistics/
   - overall/model/mode/noise/level summaries
   - per-metric matrices
   - robustness analysis
-  - model_complexity.csv copied beside summaries when available
 - visualizations/
   - line plots by level
   - model-vs-noise and model-vs-level heatmaps
@@ -264,12 +262,12 @@ stage1:
     preserve_order: true
 ```
 
-With `mode: "prompt_mode"`, multiple GPUs split the configured prompt modes. For the default three prompts:
+With `mode: "prompt_mode"`, multiple GPUs split prompt jobs. When `prompt_variants.enabled: false`, each prompt mode is one job. When `prompt_variants.enabled: true`, only the configured variants are jobs, and no default prompt variants are added.
 
 ```text
---num_gpus 1: cuda:0 runs prompt_point, prompt_bbox, prompt_point_box sequentially
---num_gpus 2: cuda:0 runs prompt_point + prompt_point_box, cuda:1 runs prompt_bbox
---num_gpus 3: cuda:0 runs prompt_point, cuda:1 runs prompt_bbox, cuda:2 runs prompt_point_box
+--num_gpus 1: cuda:0 runs all jobs sequentially
+--num_gpus 2: jobs are assigned round-robin to cuda:0 and cuda:1
+--num_gpus 3: jobs are assigned round-robin to cuda:0, cuda:1, and cuda:2
 ```
 
 Example:

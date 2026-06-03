@@ -454,7 +454,6 @@ class ExperimentEngine:
         if self.cache_noisy_images:
             self.noise_cache_dir.mkdir(parents=True, exist_ok=True)
         self.raw_columns = self._build_raw_columns()
-        self.model_complexity_rows: List[Dict[str, Any]] = []
 
     # ── public API ───────────────────────────────────────────────────────
 
@@ -492,6 +491,7 @@ class ExperimentEngine:
         dataset_filter: Optional[List[str]] = None,
         model_filter: Optional[List[str]] = None,
         prompt_filter: Optional[List[str]] = None,
+        prompt_variant_filter: Optional[List[str]] = None,
     ) -> Dict[str, Any]:
         """Execute the full STEP 1 experiment loop and return a summary."""
         datasets_cfg = self.cfg.get("datasets", [])
@@ -509,7 +509,8 @@ class ExperimentEngine:
         ds_filter = set(dataset_filter or [])
         mdl_filter = set(model_filter or [])
         prompt_filter_set = set(prompt_filter or [])
-        manifest_rows: List[Dict[str, str]] = []
+        prompt_variant_filter_set = set(prompt_variant_filter or [])
+        n_csv_files = 0
         artifact_counts: Dict[str, int] = {}
 
         for ds_cfg in datasets_cfg:
@@ -533,20 +534,20 @@ class ExperimentEngine:
                 if not prompt_modes:
                     continue
                 for pm in prompt_modes:
+                    prompt_variants = self._get_prompt_variants(
+                        pm,
+                        prompt_variant_filter=prompt_variant_filter_set,
+                    )
+                    if not prompt_variants:
+                        continue
+
                     # Proactive cache cleanup before loading the next heavy model.
                     self._runtime_cache_cleanup(force=True)
                     runner = self.model_manager.get_model(
                         runner_name, prompt_mode=pm, model_cfg=mdl_cfg,
                     )
-                    self._record_model_complexity(
-                        runner=runner,
-                        mdl_name=mdl_name,
-                        runner_name=runner_name,
-                        prompt_mode=pm,
-                    )
-
                     try:
-                        for prompt_variant in self._get_prompt_variants(pm):
+                        for prompt_variant in prompt_variants:
                             prompt_variant_name = str(prompt_variant.get("name", "default"))
                             raw_csv = self._raw_csv_path(
                                 ds_name=ds_name,
@@ -568,25 +569,15 @@ class ExperimentEngine:
                                 artifact_counts=artifact_counts,
                                 prompt_variant=prompt_variant,
                             )
-
-                            manifest_rows.append({
-                                "dataset": ds_name,
-                                "model": mdl_name,
-                                "runner": runner_name,
-                                "prompt_mode": pm,
-                                "prompt_variant": prompt_variant_name,
-                                "raw_csv": self._format_path(raw_csv),
-                            })
+                            n_csv_files += 1
                     finally:
                         self._release_runner(runner)
                         runner = None
 
-        self._write_manifest(manifest_rows)
-        self._write_model_complexity()
         return {
             "experiment": self.exp_name,
             "exp_dir": str(self.exp_dir),
-            "n_csv_files": len(manifest_rows),
+            "n_csv_files": n_csv_files,
         }
 
     # ── inner loop ───────────────────────────────────────────────────────
@@ -889,13 +880,31 @@ class ExperimentEngine:
             raw = ["prompt_bbox"]
         return list(dict.fromkeys(normalize_prompt_mode(x) for x in raw))
 
-    def _get_prompt_variants(self, prompt_mode: str) -> List[Dict[str, Any]]:
+    def _prompt_variant_job_key(self, prompt_mode: str, prompt_variant: str) -> str:
+        return f"{prompt_mode}::{prompt_variant}"
+
+    def _get_prompt_variants(
+        self,
+        prompt_mode: str,
+        *,
+        prompt_variant_filter: Optional[Set[str]] = None,
+    ) -> List[Dict[str, Any]]:
         if not self.prompt_variants_enabled:
             return [{"name": "default", "type": "default"}]
         variants = self.prompt_variants_cfg.get(prompt_mode, [])
         if isinstance(variants, list) and variants:
-            return [dict(v) for v in variants if isinstance(v, dict)]
-        return [{"name": "default", "type": "default"}]
+            out = []
+            for item in variants:
+                if not isinstance(item, dict):
+                    continue
+                name = str(item.get("name", "")).strip()
+                if not name:
+                    continue
+                if prompt_variant_filter and self._prompt_variant_job_key(prompt_mode, name) not in prompt_variant_filter:
+                    continue
+                out.append(dict(item))
+            return out
+        return []
 
     def _raw_csv_path(
         self,
@@ -1006,77 +1015,6 @@ class ExperimentEngine:
             "noisy_image_path": self._format_path(noisy_path),
             "noisy_image_source": noisy_source,
         }
-
-    def _record_model_complexity(
-        self,
-        *,
-        runner,
-        mdl_name: str,
-        runner_name: str,
-        prompt_mode: str,
-    ) -> None:
-        total_params = float("nan")
-        trainable_params = float("nan")
-        model_obj = getattr(runner, "_model", None) or getattr(runner, "_predictor", None)
-        if model_obj is not None and not hasattr(model_obj, "parameters"):
-            model_obj = getattr(model_obj, "model", model_obj)
-        if model_obj is not None and hasattr(model_obj, "parameters"):
-            try:
-                total = 0
-                trainable = 0
-                for p in model_obj.parameters():
-                    n = int(p.numel())
-                    total += n
-                    if getattr(p, "requires_grad", False):
-                        trainable += n
-                total_params = total
-                trainable_params = trainable
-            except Exception:
-                total_params = float("nan")
-                trainable_params = float("nan")
-        cfg = getattr(runner, "model_cfg", {}) or {}
-        gflops = cfg.get("GFLOPs", cfg.get("gflops", cfg.get("glops", float("nan"))))
-        self.model_complexity_rows.append({
-            "model": mdl_name,
-            "runner": runner_name,
-            "prompt_mode": prompt_mode,
-            "device": self.device,
-            "params": total_params,
-            "trainable_params": trainable_params,
-            "FLOPs": cfg.get("FLOPs", cfg.get("flops", float("nan"))),
-            "GFLOPs": gflops,
-            "GLOPs": gflops,
-        })
-
-    def _write_model_complexity(self) -> None:
-        if not self.model_complexity_rows:
-            return
-        suffix = str(self.cfg.get("_parallel_worker_suffix", "")).strip()
-        name = f"model_complexity_{suffix}.csv" if suffix else "model_complexity.csv"
-        path = self.exp_dir / name
-        fieldnames = [
-            "model",
-            "runner",
-            "prompt_mode",
-            "device",
-            "params",
-            "trainable_params",
-            "FLOPs",
-            "GFLOPs",
-            "GLOPs",
-        ]
-        seen = set()
-        rows = []
-        for row in self.model_complexity_rows:
-            key = (row.get("model"), row.get("runner"), row.get("prompt_mode"), row.get("device"))
-            if key in seen:
-                continue
-            seen.add(key)
-            rows.append(row)
-        with open(path, "w", newline="", encoding="utf-8") as fh:
-            writer = csv.DictWriter(fh, fieldnames=fieldnames)
-            writer.writeheader()
-            writer.writerows(rows)
 
     def _release_runner(self, runner) -> None:
         """Best-effort teardown to avoid keeping CUDA memory between model runs."""
@@ -1451,24 +1389,3 @@ class ExperimentEngine:
         path.parent.mkdir(parents=True, exist_ok=True)
         Image.fromarray(np.asarray(arr, dtype=np.uint8)).save(path)
         return True
-
-    # ── manifest ─────────────────────────────────────────────────────────
-
-    def _write_manifest(self, rows: List[Dict[str, str]]) -> None:
-        suffix = str(self.cfg.get("_parallel_worker_suffix", "")).strip()
-        name = f"raw_files_manifest_{suffix}.csv" if suffix else "raw_files_manifest.csv"
-        path = self.exp_dir / name
-        with open(path, "w", newline="", encoding="utf-8") as fh:
-            writer = csv.DictWriter(
-                fh,
-                fieldnames=[
-                    "dataset",
-                    "model",
-                    "runner",
-                    "prompt_mode",
-                    "prompt_variant",
-                    "raw_csv",
-                ],
-            )
-            writer.writeheader()
-            writer.writerows(rows)
