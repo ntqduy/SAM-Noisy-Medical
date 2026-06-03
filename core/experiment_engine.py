@@ -491,6 +491,7 @@ class ExperimentEngine:
         max_samples: Optional[int] = None,
         dataset_filter: Optional[List[str]] = None,
         model_filter: Optional[List[str]] = None,
+        prompt_filter: Optional[List[str]] = None,
     ) -> Dict[str, Any]:
         """Execute the full STEP 1 experiment loop and return a summary."""
         datasets_cfg = self.cfg.get("datasets", [])
@@ -507,6 +508,7 @@ class ExperimentEngine:
 
         ds_filter = set(dataset_filter or [])
         mdl_filter = set(model_filter or [])
+        prompt_filter_set = set(prompt_filter or [])
         manifest_rows: List[Dict[str, str]] = []
         artifact_counts: Dict[str, int] = {}
 
@@ -526,6 +528,10 @@ class ExperimentEngine:
                     continue
 
                 prompt_modes = self._get_prompt_modes(mdl_cfg)
+                if prompt_filter_set:
+                    prompt_modes = [pm for pm in prompt_modes if pm in prompt_filter_set]
+                if not prompt_modes:
+                    continue
                 for pm in prompt_modes:
                     # Proactive cache cleanup before loading the next heavy model.
                     self._runtime_cache_cleanup(force=True)
@@ -1045,7 +1051,9 @@ class ExperimentEngine:
     def _write_model_complexity(self) -> None:
         if not self.model_complexity_rows:
             return
-        path = self.exp_dir / "model_complexity.csv"
+        suffix = str(self.cfg.get("_parallel_worker_suffix", "")).strip()
+        name = f"model_complexity_{suffix}.csv" if suffix else "model_complexity.csv"
+        path = self.exp_dir / name
         fieldnames = [
             "model",
             "runner",
@@ -1447,7 +1455,9 @@ class ExperimentEngine:
     # ── manifest ─────────────────────────────────────────────────────────
 
     def _write_manifest(self, rows: List[Dict[str, str]]) -> None:
-        path = self.exp_dir / "raw_files_manifest.csv"
+        suffix = str(self.cfg.get("_parallel_worker_suffix", "")).strip()
+        name = f"raw_files_manifest_{suffix}.csv" if suffix else "raw_files_manifest.csv"
+        path = self.exp_dir / name
         with open(path, "w", newline="", encoding="utf-8") as fh:
             writer = csv.DictWriter(
                 fh,

@@ -36,7 +36,7 @@ stage1:
   parallel:
     enabled: true
     num_workers: 4
-    mode: "preprocess"
+    mode: "prompt_mode"
     preserve_order: true
   gc_collect_interval: 0
   cuda_cache_clear_interval: 0

@@ -260,11 +260,33 @@ stage1:
   parallel:
     enabled: true
     num_workers: 4
-    mode: "preprocess"
+    mode: "prompt_mode"
     preserve_order: true
 ```
 
-GPU prediction remains sequential per loaded runner so a model is not loaded multiple times in worker threads.
+With `mode: "prompt_mode"`, multiple GPUs split the configured prompt modes. For the default three prompts:
+
+```text
+--num_gpus 1: cuda:0 runs prompt_point, prompt_bbox, prompt_point_box sequentially
+--num_gpus 2: cuda:0 runs prompt_point + prompt_point_box, cuda:1 runs prompt_bbox
+--num_gpus 3: cuda:0 runs prompt_point, cuda:1 runs prompt_bbox, cuda:2 runs prompt_point_box
+```
+
+Example:
+
+```bash
+python main.py --config configs/full_benchmark.yaml --stage run --num_gpus 3 --models SAM2
+```
+
+This loads the selected model once per GPU/prompt worker, so it reduces wall-clock time but uses more total VRAM. The per-row `FPS` is still single-predict latency-derived FPS, not total multi-GPU throughput.
+
+To go back to the older model-split behavior:
+
+```yaml
+stage1:
+  parallel:
+    mode: "model"
+```
 
 ## Legacy Output Compatibility
 
