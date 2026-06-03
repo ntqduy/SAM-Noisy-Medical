@@ -43,7 +43,7 @@ def _legacy_exp_dir_candidates(exp_dir: Path) -> List[Path]:
 
 
 def _has_raw_outputs(exp_dir: Path) -> bool:
-    return any(exp_dir.glob("*/*/*_raw.csv"))
+    return any(exp_dir.rglob("*_raw.csv"))
 
 
 def _find_existing_exp_dir(exp_dir: Path, *, require: str) -> Path:
@@ -209,6 +209,9 @@ def _run_stage1b(cfg: Dict[str, Any], exp_dir: Path):
 
     stats_dir = exp_dir / "statistics"
     generate_comprehensive_statistics(canonical_merged_csv, stats_dir)
+    complexity_csv = source_exp_dir / "model_complexity.csv"
+    if complexity_csv.exists():
+        shutil.copy2(complexity_csv, stats_dir / "model_complexity.csv")
 
     summary = {
         **summary,

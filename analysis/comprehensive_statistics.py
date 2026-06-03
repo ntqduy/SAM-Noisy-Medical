@@ -36,7 +36,20 @@ _trapz = getattr(np, "trapezoid", None) or getattr(np, "trapz")
 #  CONSTANTS & HELPERS
 # ═══════════════════════════════════════════════════════════════════════════
 
-METRICS = ["IoU", "Dice", "Recall", "Precision", "F1", "HD"]
+METRICS = [
+    "IoU",
+    "Dice",
+    "Recall",
+    "Precision",
+    "F1",
+    "HD",
+    "HD_px",
+    "HD95_px",
+    "HD_mm",
+    "HD95_mm",
+    "inference_time_ms",
+    "FPS",
+]
 GROUP_KEYS = ["dataset", "model", "prompt_mode", "noise_type", "noise_level"]
 
 # Metric direction: True = higher-is-better, False = lower-is-better
@@ -47,6 +60,12 @@ METRIC_HIGHER_IS_BETTER: Dict[str, bool] = {
     "Precision": True,
     "F1": True,
     "HD": False,  # Hausdorff Distance: lower is better
+    "HD_px": False,
+    "HD95_px": False,
+    "HD_mm": False,
+    "HD95_mm": False,
+    "inference_time_ms": False,
+    "FPS": True,
 }
 
 
@@ -127,8 +146,21 @@ class ComprehensiveStatistics:
 
     def _preprocess(self) -> None:
         """Standardize column names and add derived columns."""
+        if "experiment_type" not in self.df.columns:
+            self.df["experiment_type"] = "main_prompt_mode_benchmark"
+        if "prompt_variant" not in self.df.columns:
+            self.df["prompt_variant"] = "default"
+
         # Ensure string columns
-        for col in ["dataset", "model", "prompt_mode", "noise_type", "noise_level"]:
+        for col in [
+            "experiment_type",
+            "dataset",
+            "model",
+            "prompt_mode",
+            "prompt_variant",
+            "noise_type",
+            "noise_level",
+        ]:
             if col in self.df.columns:
                 self.df[col] = self.df[col].astype(str).str.strip()
 
@@ -144,6 +176,14 @@ class ComprehensiveStatistics:
         for metric in METRICS:
             if metric in self.df.columns:
                 self.df[metric] = pd.to_numeric(self.df[metric], errors="coerce")
+
+        for col in [
+            "failure_rate_dice_lt_0_5",
+            "failure_rate_dice_lt_0_7",
+            "bbox_center_inside_mask_percentage",
+        ]:
+            if col in self.df.columns:
+                self.df[col] = pd.to_numeric(self.df[col], errors="coerce")
 
     def _available_metrics(self) -> List[str]:
         """Return metrics actually present in data."""
@@ -606,6 +646,60 @@ class ComprehensiveStatistics:
     #  GENERATE ALL & EXPORT
     # ─────────────────────────────────────────────────────────────────────────
 
+    def _benchmark_summary(self, df: pd.DataFrame, group_keys: List[str]) -> pd.DataFrame:
+        if df.empty:
+            return pd.DataFrame(columns=group_keys)
+
+        rows = []
+        metrics = [m for m in self._available_metrics() if m in df.columns]
+        extra_numeric = [
+            c for c in [
+                "failure_rate_dice_lt_0_5",
+                "failure_rate_dice_lt_0_7",
+                "bbox_center_inside_mask_percentage",
+            ]
+            if c in df.columns
+        ]
+
+        grouped = df.groupby(group_keys, dropna=False)
+        for keys, g in grouped:
+            if not isinstance(keys, tuple):
+                keys = (keys,)
+            row = dict(zip(group_keys, keys))
+            for metric in metrics:
+                vals = pd.to_numeric(g[metric], errors="coerce").dropna()
+                row[f"{metric}_mean"] = vals.mean() if len(vals) else np.nan
+                row[f"{metric}_std"] = vals.std(ddof=0) if len(vals) else np.nan
+            for col in extra_numeric:
+                vals = pd.to_numeric(g[col], errors="coerce").dropna()
+                row[col] = vals.mean() if len(vals) else np.nan
+            rows.append(row)
+        return pd.DataFrame(rows)
+
+    def main_prompt_mode_summary(self) -> pd.DataFrame:
+        df = self.df[self.df["experiment_type"] == "main_prompt_mode_benchmark"].copy()
+        return self._benchmark_summary(
+            df,
+            ["dataset", "model", "prompt_mode", "noise_type", "noise_level"],
+        )
+
+    def prompt_variant_summary(self) -> pd.DataFrame:
+        df = self.df[self.df["experiment_type"] == "prompt_variant_benchmark"].copy()
+        return self._benchmark_summary(
+            df,
+            ["dataset", "model", "prompt_mode", "prompt_variant", "noise_type", "noise_level"],
+        )
+
+    def prompt_variant_comparison(self) -> pd.DataFrame:
+        summary = self.prompt_variant_summary()
+        if summary.empty:
+            return summary
+        summary = summary.copy()
+        summary["prompt_variant_comparison"] = (
+            summary["prompt_mode"].astype(str) + ":" + summary["prompt_variant"].astype(str)
+        )
+        return summary
+
     def generate_all(self) -> Dict[str, Path]:
         """Generate all statistics and export to CSV files."""
         paths = {}
@@ -675,6 +769,21 @@ class ComprehensiveStatistics:
         p = self.output_dir / "10_robustness_analysis.csv"
         robust.to_csv(p, index=False)
         paths["robustness_analysis"] = p
+
+        main_prompt = self.main_prompt_mode_summary()
+        p = self.output_dir / "11_main_prompt_mode_summary.csv"
+        main_prompt.to_csv(p, index=False)
+        paths["main_prompt_mode_summary"] = p
+
+        prompt_variant = self.prompt_variant_summary()
+        p = self.output_dir / "12_prompt_variant_summary.csv"
+        prompt_variant.to_csv(p, index=False)
+        paths["prompt_variant_summary"] = p
+
+        prompt_comparison = self.prompt_variant_comparison()
+        p = self.output_dir / "13_prompt_variant_comparison.csv"
+        prompt_comparison.to_csv(p, index=False)
+        paths["prompt_variant_comparison"] = p
 
         # Summary manifest
         manifest = pd.DataFrame([

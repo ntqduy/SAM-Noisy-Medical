@@ -31,7 +31,7 @@ class StatisticsMerger:
         Returns summary metadata.
         """
         exp_dir = Path(exp_dir)
-        raw_files = sorted(exp_dir.glob("*/*/*_raw.csv"))
+        raw_files = sorted(exp_dir.rglob("*_raw.csv"))
         if not raw_files:
             raise RuntimeError(
                 f"No raw CSV files found under {exp_dir}. Run STEP 1 first."

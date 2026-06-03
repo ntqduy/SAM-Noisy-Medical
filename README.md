@@ -100,7 +100,14 @@ Main config: configs/full_benchmark.yaml
     low_brightness, high_brightness, low_contrast, high_contrast,
     rician, poisson
 - levels: L0 to L9
-- metrics: IoU, Dice, Recall, Precision, F1, HD
+- metrics: IoU, Dice, Recall, Precision, F1, HD, HD_px, HD95_px, HD_mm, HD95_mm, inference_time_ms, FPS
+
+To rerun the old full setup with the new metrics:
+
+```bash
+python main.py --config configs/full_benchmark.yaml --stage run
+python main.py --config configs/full_benchmark.yaml --stage aggregate
+```
 
 ## Output Structure
 
@@ -108,10 +115,12 @@ Typical files under outputs/full_benchmark/:
 
 - statistics_merged.csv
 - stage1b_summary.csv
+- model_complexity.csv
 - statistics/
   - overall/model/mode/noise/level summaries
   - per-metric matrices
   - robustness analysis
+  - model_complexity.csv copied beside summaries when available
 - visualizations/
   - line plots by level
   - model-vs-noise and model-vs-level heatmaps
@@ -120,11 +129,27 @@ Typical files under outputs/full_benchmark/:
 
 Raw files are written per dataset/model/prompt combination as *_raw.csv and *_stats.csv.
 
+When `prompt_variants.enabled: true`, variant raw files are separated under:
+
+```text
+outputs/full_benchmark/prompt_variants/<prompt_mode>/<prompt_variant>/<dataset>/<model>/
+```
+
+The main benchmark layout remains:
+
+```text
+outputs/full_benchmark/<dataset>/<model>/
+```
+
 ## Metrics And Aggregation
 
-Statistics are grouped by:
+Main prompt mode statistics are grouped by:
 
 dataset, model, prompt_mode, noise_type, noise_level
+
+Prompt variant statistics are grouped by:
+
+dataset, model, prompt_mode, prompt_variant, noise_type, noise_level
 
 For each metric, aggregate stage reports:
 
@@ -137,8 +162,109 @@ Additional fields:
 
 - gt_empty_rate
 - pred_empty_rate
+- failure_rate_dice_lt_0_5
+- failure_rate_dice_lt_0_7
+- bbox_center_inside_mask_percentage
 - n_images
 - n_rows
+
+Important: do not mix `main_prompt_mode_benchmark` and `prompt_variant_benchmark` summaries in a paper. The former compares prompt modes; the latter compares variants inside one prompt mode.
+
+## New Metrics
+
+Enable the metric additions in config:
+
+```yaml
+metrics:
+  add_hd95: true
+  add_physical_distance: true
+  spacing_source: "sample_meta"
+  fallback_spacing: null
+  keep_legacy_hd: true
+
+performance:
+  log_inference_time: true
+  log_fps: true
+```
+
+`HD` is preserved as the legacy pixel Hausdorff distance. `HD_px` is an alias of `HD`, and `HD95_px` is the 95th percentile surface distance in pixels. `HD_mm` and `HD95_mm` use `sample["meta"]["spacing"]` as `(spacing_y, spacing_x)`; when spacing is missing they are `nan`.
+
+## Prompt Variants
+
+Keep `prompt_modes` unchanged. Turn on variants only when you want to compare bbox or point choices within a prompt mode:
+
+```yaml
+prompt_variants:
+  enabled: true
+```
+
+`prompt_bbox` variants include `bbox_gt_5`, `bbox_expand_10`, `bbox_expand_20`, `bbox_shift_10`, and `bbox_shrink_10`. `prompt_point` variants include `point_center_bbox`, `point_centroid`, and `point_random_inside`.
+
+`point_center_bbox` uses the center of the GT-derived bbox. `point_centroid` uses the GT mask centroid, which can differ from the bbox center and can land differently for asymmetric masks.
+
+Variant raw filenames include the variant:
+
+```text
+<runner>_<dataset>_<prompt_mode>_<prompt_variant>_raw.csv
+```
+
+## Noisy Image Reuse And Saving
+
+Stage 1 can reuse already saved noisy images:
+
+```yaml
+stage1:
+  reuse_existing_noisy_images: true
+  existing_noisy_root: "/data2/Medical/StrokeCT-outputs/full_benchmark/artifacts/_shared"
+  fallback_generate_noise_if_missing: true
+```
+
+Reuse is logged in raw CSV with `noisy_image_source=external_cache`; generated images use `generated`, and internal `.npy` cache hits use `internal_cache`.
+
+By default in `configs/full_benchmark.yaml`, GT masks, original images, and noisy images are not copied again:
+
+```yaml
+stage1:
+  save_pred_masks: true
+  save_gt_masks: false
+  save_original_images: false
+  save_noisy_images: false
+```
+
+Pred masks are saved only when `save_pred_masks: true`, under:
+
+```text
+outputs/full_benchmark/pred_masks/<dataset>/<model>/<prompt_mode>/<prompt_variant>/<noise_type>/<level>/<seed>/<image_id>.png
+```
+
+Use pred masks for metric recomputation or debugging; otherwise turn them off to save disk.
+
+## Parallel Runs
+
+Single device:
+
+```yaml
+device: "cuda:0"
+```
+
+Explicit multi-GPU model split:
+
+```yaml
+devices: ["cuda:0", "cuda:1"]
+```
+
+Safe preprocessing/cache settings:
+
+```yaml
+stage1:
+  parallel:
+    enabled: true
+    num_workers: 4
+    mode: "preprocess"
+    preserve_order: true
+```
+
+GPU prediction remains sequential per loaded runner so a model is not loaded multiple times in worker threads.
 
 ## Legacy Output Compatibility
 

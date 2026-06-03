@@ -25,8 +25,77 @@ stage1:
   cache_noisy_images: true
   noise_cache_dir: "noise_cache"
   clear_noise_cache_on_start: false
+  reuse_existing_noisy_images: true
+  existing_noisy_root: "outputs/full_benchmark/artifacts/_shared"
+  fallback_generate_noise_if_missing: true
+  save_pred_masks: true
+  save_gt_masks: false
+  save_original_images: false
+  save_noisy_images: false
+  save_relative_paths_only: true
+  parallel:
+    enabled: true
+    num_workers: 4
+    mode: "preprocess"
+    preserve_order: true
   gc_collect_interval: 0
   cuda_cache_clear_interval: 0
+
+metrics:
+  add_hd95: true
+  add_physical_distance: true
+  spacing_source: "sample_meta"
+  fallback_spacing: null
+  keep_legacy_hd: true
+
+performance:
+  log_inference_time: true
+  log_fps: true
+
+prompt_variants:
+  enabled: false
+
+  prompt_bbox:
+    - name: bbox_gt_5
+      type: baseline
+      expand: 0.05
+
+    - name: bbox_expand_10
+      type: expand
+      expand: 0.10
+
+    - name: bbox_expand_20
+      type: expand
+      expand: 0.20
+
+    - name: bbox_shift_10
+      type: translate
+      shift_x: [-0.10, 0.10]
+      shift_y: [-0.10, 0.10]
+      relative_to: bbox_size
+
+    - name: bbox_shrink_10
+      type: shrink
+      shrink: 0.10
+      min_size: 4
+      clip_to_image: true
+
+  prompt_point:
+    - name: point_center_bbox
+      type: bbox_center
+
+    - name: point_centroid
+      type: mask_centroid
+
+    - name: point_random_inside
+      type: random_inside_mask
+      n_random: 1
+      seed_mode: deterministic
+
+  prompt_point_box:
+    - name: point_centroid_bbox_gt_5
+      point_variant: point_centroid
+      bbox_variant: bbox_gt_5
 
 # ─────────────────────────────────────────────────────────────────────────
 #  DATASETS

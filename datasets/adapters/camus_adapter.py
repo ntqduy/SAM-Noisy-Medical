@@ -97,6 +97,18 @@ class CAMUSAdapter(DatasetAdapter):
         # Squeeze any trailing singleton dims (e.g. (H, W, 1))
         return np.squeeze(data)
 
+    @staticmethod
+    def _spacing_yx(p: Path) -> Tuple[float, float] | None:
+        try:
+            import nibabel as nib
+
+            zooms = tuple(float(v) for v in nib.load(str(p)).header.get_zooms())
+        except Exception:
+            return None
+        if len(zooms) >= 2 and zooms[0] > 0 and zooms[1] > 0:
+            return (zooms[1], zooms[0])
+        return None
+
     def _make_image(self, p: Path) -> np.ndarray:
         arr = self._load_nifti_2d(p)
         # Normalise to uint8
@@ -127,5 +139,6 @@ class CAMUSAdapter(DatasetAdapter):
             "meta": {
                 "img_path": str(img_path),
                 "gt_path": str(gt_path),
+                "spacing": self._spacing_yx(img_path),
             },
         }

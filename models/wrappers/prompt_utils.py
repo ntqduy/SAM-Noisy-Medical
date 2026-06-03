@@ -4,7 +4,8 @@ Prompt helper utilities – build standard prompt payloads from ground-truth mas
 
 from __future__ import annotations
 
-from typing import Any, Dict, Optional, Tuple
+import hashlib
+from typing import Any, Dict, Optional, Sequence, Tuple
 
 import numpy as np
 
@@ -247,6 +248,193 @@ def _clip_bbox(
     return (x0, y0, x1, y1)
 
 
+def _tight_bbox(
+    mask: np.ndarray,
+    fg_coords: Optional[np.ndarray] = None,
+) -> Optional[Tuple[int, int, int, int]]:
+    coords = _foreground_coords(mask) if fg_coords is None else fg_coords
+    if coords.shape[0] == 0:
+        return None
+    xs = coords[:, 0]
+    ys = coords[:, 1]
+    return (int(xs.min()), int(ys.min()), int(xs.max()), int(ys.max()))
+
+
+def _bbox_center(bbox: Optional[Tuple[int, int, int, int]]) -> Optional[Tuple[int, int]]:
+    if bbox is None:
+        return None
+    x0, y0, x1, y1 = [int(v) for v in bbox]
+    return (int(round((x0 + x1) / 2.0)), int(round((y0 + y1) / 2.0)))
+
+
+def _as_range_value(value: Any, rng: np.random.Generator) -> float:
+    if isinstance(value, (list, tuple)) and len(value) >= 2:
+        lo = float(value[0])
+        hi = float(value[1])
+        return float(rng.uniform(lo, hi))
+    return float(value)
+
+
+def deterministic_variant_seed(parts: Sequence[Any]) -> int:
+    key = "|".join(str(p) for p in parts)
+    digest = hashlib.sha256(key.encode("utf-8")).hexdigest()[:8]
+    return int(digest, 16)
+
+
+def _bbox_from_variant(
+    mask: np.ndarray,
+    image_shape: Tuple[int, int],
+    variant: Optional[Dict[str, Any]],
+    *,
+    deterministic_parts: Sequence[Any] = (),
+) -> Optional[Tuple[int, int, int, int]]:
+    if variant is None:
+        return None
+
+    m = np.asarray(mask).astype(bool)
+    coords = _foreground_coords(m)
+    if coords.shape[0] == 0:
+        return None
+
+    vtype = str(variant.get("type", "baseline")).strip().lower()
+    if vtype == "baseline":
+        expand = float(max(0.0, variant.get("expand", 0.05)))
+        min_margin_px = int(max(0, variant.get("min_margin_px", 2)))
+        max_margin_ratio = float(max(expand, variant.get("max_margin_ratio", 0.12)))
+        return _clip_bbox(
+            mask_to_bbox(
+                m,
+                margin_ratio=expand,
+                min_margin_px=min_margin_px,
+                max_margin_ratio=max_margin_ratio,
+                fg_coords=coords,
+            ),
+            image_shape,
+        )
+
+    tight = _tight_bbox(m, fg_coords=coords)
+    if tight is None:
+        return None
+
+    h, w = image_shape
+    x0, y0, x1, y1 = [int(v) for v in tight]
+    bw = max(1, x1 - x0 + 1)
+    bh = max(1, y1 - y0 + 1)
+
+    if vtype == "expand":
+        expand = float(max(0.0, variant.get("expand", 0.0)))
+        dx = int(round(bw * expand))
+        dy = int(round(bh * expand))
+        return _clip_bbox((x0 - dx, y0 - dy, x1 + dx, y1 + dy), image_shape)
+
+    base_expand = float(max(0.0, variant.get("base_expand", 0.05)))
+    base_bbox = mask_to_bbox(m, margin_ratio=base_expand, fg_coords=coords)
+    if base_bbox is None:
+        base_bbox = tight
+    x0, y0, x1, y1 = [int(v) for v in base_bbox]
+    bw = max(1, x1 - x0 + 1)
+    bh = max(1, y1 - y0 + 1)
+
+    if vtype == "translate":
+        seed = deterministic_variant_seed(deterministic_parts)
+        rng = np.random.default_rng(seed)
+        sx = _as_range_value(variant.get("shift_x", 0.0), rng)
+        sy = _as_range_value(variant.get("shift_y", 0.0), rng)
+        if str(variant.get("relative_to", "bbox_size")).lower() == "bbox_size":
+            dx = int(round(sx * bw))
+            dy = int(round(sy * bh))
+        else:
+            dx = int(round(sx))
+            dy = int(round(sy))
+        return _clip_bbox((x0 + dx, y0 + dy, x1 + dx, y1 + dy), image_shape)
+
+    if vtype == "shrink":
+        shrink = float(max(0.0, variant.get("shrink", 0.0)))
+        min_size = int(max(1, variant.get("min_size", 1)))
+        dx = int(round(bw * shrink))
+        dy = int(round(bh * shrink))
+        nx0, ny0, nx1, ny1 = x0 + dx, y0 + dy, x1 - dx, y1 - dy
+        if nx1 - nx0 + 1 < min_size:
+            cx = (x0 + x1) / 2.0
+            half = (min_size - 1) / 2.0
+            nx0 = int(round(cx - half))
+            nx1 = int(round(cx + half))
+        if ny1 - ny0 + 1 < min_size:
+            cy = (y0 + y1) / 2.0
+            half = (min_size - 1) / 2.0
+            ny0 = int(round(cy - half))
+            ny1 = int(round(cy + half))
+        if bool(variant.get("clip_to_image", True)):
+            return _clip_bbox((nx0, ny0, nx1, ny1), image_shape)
+        return (max(0, nx0), max(0, ny0), min(w - 1, nx1), min(h - 1, ny1))
+
+    return _clip_bbox(base_bbox, image_shape)
+
+
+def _point_from_variant(
+    mask: np.ndarray,
+    image_shape: Tuple[int, int],
+    variant: Optional[Dict[str, Any]],
+    *,
+    bbox: Optional[Tuple[int, int, int, int]] = None,
+    deterministic_parts: Sequence[Any] = (),
+) -> Tuple[Optional[Tuple[int, int]], Optional[np.ndarray]]:
+    if variant is None:
+        return None, None
+
+    m = np.asarray(mask).astype(bool)
+    vtype = str(variant.get("type", "mask_centroid")).strip().lower()
+
+    if vtype == "bbox_center":
+        base_bbox = bbox
+        if base_bbox is None:
+            base_bbox = mask_to_bbox(m, margin_ratio=0.05)
+        pt = _clip_point(_bbox_center(base_bbox), image_shape)
+        if pt is None:
+            return None, None
+        return pt, np.asarray([pt], dtype=np.int32)
+
+    if vtype == "mask_centroid":
+        pt = _clip_point(mask_centroid(m), image_shape)
+        if pt is None:
+            return None, None
+        return pt, np.asarray([pt], dtype=np.int32)
+
+    if vtype == "random_inside_mask":
+        coords = _foreground_coords(m)
+        if coords.shape[0] == 0:
+            return None, None
+        n_random = int(max(1, variant.get("n_random", 1)))
+        seed = deterministic_variant_seed(deterministic_parts)
+        rng = np.random.default_rng(seed)
+        idx = rng.choice(coords.shape[0], size=min(n_random, coords.shape[0]), replace=False)
+        pts = coords[np.asarray(idx)].astype(np.int32).reshape(-1, 2)
+        pt = (int(pts[0, 0]), int(pts[0, 1]))
+        return pt, pts
+
+    return None, None
+
+
+def bbox_center_inside_mask(
+    mask: Optional[np.ndarray],
+    bbox: Optional[Tuple[int, int, int, int]],
+) -> float:
+    if mask is None or bbox is None:
+        return float("nan")
+    m = np.asarray(mask).astype(bool)
+    if m.ndim > 2:
+        m = np.squeeze(m)
+    if m.ndim != 2:
+        return float("nan")
+    center = _bbox_center(bbox)
+    if center is None:
+        return float("nan")
+    x, y = center
+    if y < 0 or y >= m.shape[0] or x < 0 or x >= m.shape[1]:
+        return float("nan")
+    return 1.0 if bool(m[y, x]) else 0.0
+
+
 def resolve_prompt(
     prompt: Optional[Dict[str, Any]],
     image_shape: Tuple[int, int],
@@ -317,7 +505,7 @@ def resolve_prompt(
 
     if gt_mask is not None and np.asarray(gt_mask).astype(bool).any():
         fg_coords = _foreground_coords(gt_mask)
-        if fg_coords.shape[0] > 0:
+        if fg_coords.shape[0] > 0 and points_arr is None:
             if mode == "prompt_point" and auto_points_by_components:
                 # Fair point policy for benchmark: 1 connected object -> 1 point,
                 # 2 connected objects -> 2 points (capped by max_auto_fg_points).
@@ -396,6 +584,102 @@ def resolve_prompt(
         "bbox": bbox,
         "gt_mask": gt_mask,
     }
+
+
+def resolve_prompt_variant(
+    prompt: Optional[Dict[str, Any]],
+    image_shape: Tuple[int, int],
+    prompt_mode: str,
+    *,
+    prompt_variant: Optional[Dict[str, Any]] = None,
+    bbox_variants: Optional[Dict[str, Dict[str, Any]]] = None,
+    point_variants: Optional[Dict[str, Dict[str, Any]]] = None,
+    deterministic_parts: Sequence[Any] = (),
+) -> Dict[str, Any]:
+    """
+    Resolve a prompt using an optional benchmark prompt variant.
+
+    When ``prompt_variant`` is ``None``, this is equivalent to
+    ``resolve_prompt`` plus metadata fields that label the row as ``default``.
+    """
+    payload = dict(prompt or {})
+    gt_mask = payload.get("gt_mask")
+    mode = normalize_prompt_mode(prompt_mode)
+    variant_name = "default"
+    bbox_variant_name = "default"
+    point_variant_name = "default"
+    prompt_source = "legacy_default"
+
+    if prompt_variant:
+        variant_name = str(prompt_variant.get("name", "variant"))
+        prompt_source = "prompt_variants_config"
+
+        bbox_cfg: Optional[Dict[str, Any]] = None
+        point_cfg: Optional[Dict[str, Any]] = None
+
+        if mode == "prompt_bbox":
+            bbox_cfg = prompt_variant
+            bbox_variant_name = variant_name
+            point_variant_name = "none"
+        elif mode == "prompt_point":
+            point_cfg = prompt_variant
+            point_variant_name = variant_name
+            bbox_variant_name = "none"
+        elif mode == "prompt_point_box":
+            bbox_name = str(prompt_variant.get("bbox_variant", ""))
+            point_name = str(prompt_variant.get("point_variant", ""))
+            bbox_variant_name = bbox_name or "none"
+            point_variant_name = point_name or "none"
+            if bbox_variants and bbox_name in bbox_variants:
+                bbox_cfg = bbox_variants[bbox_name]
+            if point_variants and point_name in point_variants:
+                point_cfg = point_variants[point_name]
+
+        bbox = None
+        if gt_mask is not None and bbox_cfg is not None:
+            bbox = _bbox_from_variant(
+                gt_mask,
+                image_shape,
+                bbox_cfg,
+                deterministic_parts=[*deterministic_parts, variant_name, bbox_variant_name],
+            )
+            if bbox is not None:
+                payload["bbox"] = bbox
+
+        if gt_mask is not None and point_cfg is not None:
+            point, points = _point_from_variant(
+                gt_mask,
+                image_shape,
+                point_cfg,
+                bbox=bbox,
+                deterministic_parts=[*deterministic_parts, variant_name, point_variant_name],
+            )
+            if point is not None:
+                payload["point"] = point
+            if points is not None and points.shape[0] > 0:
+                payload["points"] = points
+                payload["point_labels"] = np.ones((points.shape[0],), dtype=np.int32)
+                payload["single_point"] = points.shape[0] <= 1
+
+    resolved = resolve_prompt(payload, image_shape, prompt_mode=mode)
+    has_bbox = resolved.get("bbox") is not None
+    points = resolved.get("points")
+    has_point = resolved.get("point") is not None or (
+        points is not None and np.asarray(points).reshape(-1, 2).shape[0] > 0
+    )
+    resolved.update({
+        "prompt_variant": variant_name,
+        "bbox_variant": bbox_variant_name,
+        "point_variant": point_variant_name,
+        "prompt_source": prompt_source,
+        "prompt_has_bbox": 1 if has_bbox else 0,
+        "prompt_has_point": 1 if has_point else 0,
+        "is_bbox_center_inside_mask": bbox_center_inside_mask(
+            gt_mask,
+            resolved.get("bbox"),
+        ),
+    })
+    return resolved
 
 
 def prompt_bbox_stats(prompt: Dict[str, Any]) -> Dict[str, int]:
