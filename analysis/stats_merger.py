@@ -15,6 +15,17 @@ import pandas as pd
 from analysis.aggregator import MetricAggregator
 
 
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+
+
+def _format_project_path(path: Path) -> str:
+    p = Path(path)
+    try:
+        return p.resolve().relative_to(PROJECT_ROOT).as_posix()
+    except (OSError, ValueError):
+        return str(p)
+
+
 class StatisticsMerger:
     """
     Walk an experiment directory, aggregate every ``*_raw.csv``,
@@ -46,7 +57,7 @@ class StatisticsMerger:
             stats_df.to_csv(stats_path, index=False)
             if not stats_df.empty:
                 stats_df = stats_df.copy()
-                stats_df["source_stats_file"] = str(stats_path)
+                stats_df["source_stats_file"] = _format_project_path(stats_path)
                 merged_parts.append(stats_df)
 
         merged_df = (
@@ -61,7 +72,7 @@ class StatisticsMerger:
             "experiment": exp_dir.name,
             "n_raw_files": len(raw_files),
             "n_stats_files": len(raw_files),
-            "merged_statistics_csv": str(merged_path),
+            "merged_statistics_csv": _format_project_path(merged_path),
         }
         pd.DataFrame([summary]).to_csv(
             exp_dir / "stage1b_summary.csv", index=False

@@ -460,16 +460,16 @@ class ExperimentEngine:
 
     def _build_raw_columns(self) -> List[str]:
         columns = list(BASE_RAW_COLUMNS)
-        if self.log_prompt_metadata:
-            _append_columns(columns, PROMPT_METADATA_COLUMNS)
-        if self.use_output_policy:
-            _append_columns(columns, OUTPUT_PATH_COLUMNS)
         if self.add_hd95:
             _append_columns(columns, HD95_COLUMNS)
         if self.add_physical_distance:
             _append_columns(columns, PHYSICAL_DISTANCE_COLUMNS)
         if self.log_inference_time or self.log_fps:
             _append_columns(columns, PERFORMANCE_COLUMNS)
+        if self.log_prompt_metadata:
+            _append_columns(columns, PROMPT_METADATA_COLUMNS)
+        if self.use_output_policy:
+            _append_columns(columns, OUTPUT_PATH_COLUMNS)
         return columns
 
     def _variant_map(self, prompt_mode: str) -> Dict[str, Dict[str, Any]]:
@@ -575,7 +575,7 @@ class ExperimentEngine:
                                 "runner": runner_name,
                                 "prompt_mode": pm,
                                 "prompt_variant": prompt_variant_name,
-                                "raw_csv": str(raw_csv),
+                                "raw_csv": self._format_path(raw_csv),
                             })
                     finally:
                         self._release_runner(runner)

@@ -564,7 +564,7 @@ def parse_args():
         type=int,
         default=None,
         help="Number of GPUs for parallel Stage 1. "
-             "Models are split round-robin across cuda:0 … cuda:N-1.",
+             "Work is split round-robin across cuda:0..cuda:N-1 using stage1.parallel.mode.",
     )
     return ap.parse_args()
 
