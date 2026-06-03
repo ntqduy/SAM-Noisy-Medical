@@ -51,6 +51,13 @@ METRICS = [
     "FPS",
 ]
 GROUP_KEYS = ["dataset", "model", "prompt_mode", "noise_type", "noise_level"]
+MODEL_COMPLEXITY_COLUMNS = [
+    "params",
+    "trainable_params",
+    "FLOPs",
+    "GFLOPs",
+    "GLOPs",
+]
 
 # Metric direction: True = higher-is-better, False = lower-is-better
 METRIC_HIGHER_IS_BETTER: Dict[str, bool] = {
@@ -176,6 +183,9 @@ class ComprehensiveStatistics:
         for metric in METRICS:
             if metric in self.df.columns:
                 self.df[metric] = pd.to_numeric(self.df[metric], errors="coerce")
+        for col in MODEL_COMPLEXITY_COLUMNS:
+            if col in self.df.columns:
+                self.df[col] = pd.to_numeric(self.df[col], errors="coerce")
 
         for col in [
             "failure_rate_dice_lt_0_5",
@@ -189,11 +199,30 @@ class ComprehensiveStatistics:
         """Return metrics actually present in data."""
         return [m for m in METRICS if m in self.df.columns]
 
+    def _model_complexity_fields(self, model_df: pd.DataFrame) -> Dict[str, float]:
+        fields: Dict[str, float] = {}
+        for col in MODEL_COMPLEXITY_COLUMNS:
+            if col not in model_df.columns:
+                continue
+            vals = pd.to_numeric(model_df[col], errors="coerce").dropna()
+            fields[col] = float(vals.iloc[0]) if len(vals) else np.nan
+        return fields
+
     def _available_levels(self) -> List[str]:
         """Return all levels present in data, sorted."""
         if "noise_level" not in self.df.columns:
             return []
         return _sorted_levels(self.df["noise_level"].dropna().unique().tolist())
+
+    def model_profile_summary(self) -> pd.DataFrame:
+        rows = []
+        for model in self.df["model"].dropna().unique():
+            model_df = self.df[self.df["model"] == model]
+            rows.append({
+                "model": model,
+                **self._model_complexity_fields(model_df),
+            })
+        return pd.DataFrame(rows)
 
     # ─────────────────────────────────────────────────────────────────────────
     #  1. OVERALL SUMMARY
@@ -270,6 +299,7 @@ class ComprehensiveStatistics:
 
         for model in self.df["model"].dropna().unique():
             model_df = self.df[self.df["model"] == model]
+            model_complexity = self._model_complexity_fields(model_df)
 
             for metric in metrics:
                 vals = model_df[metric].dropna()
@@ -293,6 +323,7 @@ class ComprehensiveStatistics:
 
                 rows.append({
                     "model": model,
+                    **model_complexity,
                     "metric": metric,
                     "clean_perf": clean_mean,
                     "noisy_mean": noisy_mean,
@@ -529,6 +560,7 @@ class ComprehensiveStatistics:
             summary_rows = []
             for model in self.df["model"].dropna().unique():
                 model_df = self.df[self.df["model"] == model]
+                model_complexity = self._model_complexity_fields(model_df)
                 vals = model_df[metric].dropna()
                 clean_vals = model_df.loc[model_df["is_clean"] == True, metric].dropna()
                 noisy_vals = model_df.loc[model_df["is_clean"] == False, metric].dropna()
@@ -538,6 +570,7 @@ class ComprehensiveStatistics:
 
                 summary_rows.append({
                     "model": model,
+                    **model_complexity,
                     "clean": clean_mean,
                     "noisy_mean": noisy_mean,
                     "overall": vals.mean() if len(vals) else np.nan,
@@ -582,6 +615,7 @@ class ComprehensiveStatistics:
 
         for model in self.df["model"].dropna().unique():
             model_df = self.df[self.df["model"] == model]
+            model_complexity = self._model_complexity_fields(model_df)
 
             for metric in metrics:
                 # Get level-wise means
@@ -623,6 +657,7 @@ class ComprehensiveStatistics:
 
                 rows.append({
                     "model": model,
+                    **model_complexity,
                     "metric": metric,
                     "clean_score": clean_score,
                     "noisy_mean": noisy_mean,
@@ -666,6 +701,11 @@ class ComprehensiveStatistics:
             if not isinstance(keys, tuple):
                 keys = (keys,)
             row = dict(zip(group_keys, keys))
+            for col in MODEL_COMPLEXITY_COLUMNS:
+                if col not in g.columns:
+                    continue
+                vals = pd.to_numeric(g[col], errors="coerce").dropna()
+                row[col] = float(vals.iloc[0]) if len(vals) else np.nan
             for metric in metrics:
                 vals = pd.to_numeric(g[metric], errors="coerce").dropna()
                 row[f"{metric}_mean"] = vals.mean() if len(vals) else np.nan
@@ -703,6 +743,11 @@ class ComprehensiveStatistics:
     def generate_all(self) -> Dict[str, Path]:
         """Generate all statistics and export to CSV files."""
         paths = {}
+
+        profile = self.model_profile_summary()
+        p = self.output_dir / "00_model_profile_summary.csv"
+        profile.to_csv(p, index=False)
+        paths["model_profile_summary"] = p
 
         # 1. Overall summary
         overall = self.overall_summary()

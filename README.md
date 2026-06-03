@@ -116,6 +116,7 @@ Typical files under outputs/full_benchmark/:
 - statistics_merged.csv
 - stage1b_summary.csv
 - statistics/
+  - 00_model_profile_summary.csv
   - overall/model/mode/noise/level summaries
   - per-metric matrices
   - robustness analysis
@@ -126,6 +127,7 @@ Typical files under outputs/full_benchmark/:
   - noise gallery and optional segmentation gallery
 
 Raw files are written per dataset/model/prompt combination as *_raw.csv and *_stats.csv.
+Model resource metadata (`params`, `trainable_params`, `FLOPs`, `GFLOPs`, `GLOPs`) is carried into `*_stats.csv`, `statistics_merged.csv`, and the `statistics/` summaries instead of separate root-level complexity files.
 
 When `prompt_variants.enabled: true`, variant raw files are separated under:
 

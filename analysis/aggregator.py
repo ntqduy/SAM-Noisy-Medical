@@ -29,6 +29,13 @@ METRICS = [
 ]
 BASE_GROUP_KEYS = ["dataset", "model", "prompt_mode", "noise_type", "noise_level"]
 GROUP_KEYS = BASE_GROUP_KEYS
+MODEL_COMPLEXITY_COLUMNS = [
+    "params",
+    "trainable_params",
+    "FLOPs",
+    "GFLOPs",
+    "GLOPs",
+]
 
 
 def _parse_level_idx(level: str) -> int:
@@ -63,6 +70,10 @@ class MetricAggregator:
             if metric in df.columns:
                 df[metric] = pd.to_numeric(df[metric], errors="coerce")
                 df[metric] = df[metric].replace([np.inf, -np.inf], np.nan)
+        for col in MODEL_COMPLEXITY_COLUMNS:
+            if col in df.columns:
+                df[col] = pd.to_numeric(df[col], errors="coerce")
+                df[col] = df[col].replace([np.inf, -np.inf], np.nan)
 
         group_keys = [
             "experiment_type",
@@ -93,6 +104,11 @@ class MetricAggregator:
                 row["bbox_center_inside_mask_percentage"] = (
                     float(inside_vals.mean() * 100.0) if len(inside_vals) else np.nan
                 )
+            for col in MODEL_COMPLEXITY_COLUMNS:
+                if col not in g.columns:
+                    continue
+                vals = pd.to_numeric(g[col], errors="coerce").dropna()
+                row[col] = float(vals.iloc[0]) if len(vals) else np.nan
             for metric in METRICS:
                 if metric not in g.columns:
                     continue

@@ -103,6 +103,13 @@ OUTPUT_PATH_COLUMNS = [
 HD95_COLUMNS = ["HD_px", "HD95_px"]
 PHYSICAL_DISTANCE_COLUMNS = ["HD_mm", "HD95_mm"]
 PERFORMANCE_COLUMNS = ["inference_time_ms", "FPS"]
+MODEL_COMPLEXITY_COLUMNS = [
+    "params",
+    "trainable_params",
+    "FLOPs",
+    "GFLOPs",
+    "GLOPs",
+]
 
 RESUME_KEY_COLUMNS = {
     "dataset",
@@ -148,6 +155,28 @@ def _fg_stats(mask: np.ndarray) -> Dict[str, int]:
 
 def _sanitize_id(image_id: str) -> str:
     return re.sub(r"[^A-Za-z0-9_.-]+", "_", str(image_id))
+
+
+def _to_number_or_nan(value: Any) -> float:
+    if value is None:
+        return float("nan")
+    if isinstance(value, str):
+        value = value.strip().replace(",", "")
+        if not value or value.lower() in {"nan", "none", "null"}:
+            return float("nan")
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return float("nan")
+
+
+def _first_cfg_number(cfg: Dict[str, Any], *names: str) -> float:
+    for name in names:
+        if name in cfg:
+            value = _to_number_or_nan(cfg.get(name))
+            if np.isfinite(value):
+                return value
+    return float("nan")
 
 
 def _parse_level_idx(level: str) -> int:
@@ -469,6 +498,7 @@ class ExperimentEngine:
             _append_columns(columns, PROMPT_METADATA_COLUMNS)
         if self.use_output_policy:
             _append_columns(columns, OUTPUT_PATH_COLUMNS)
+        _append_columns(columns, MODEL_COMPLEXITY_COLUMNS)
         return columns
 
     def _variant_map(self, prompt_mode: str) -> Dict[str, Dict[str, Any]]:
@@ -546,6 +576,10 @@ class ExperimentEngine:
                     runner = self.model_manager.get_model(
                         runner_name, prompt_mode=pm, model_cfg=mdl_cfg,
                     )
+                    model_complexity = self._model_complexity_row_fields(
+                        runner=runner,
+                        model_cfg=mdl_cfg,
+                    )
                     try:
                         for prompt_variant in prompt_variants:
                             prompt_variant_name = str(prompt_variant.get("name", "default"))
@@ -568,6 +602,7 @@ class ExperimentEngine:
                                 raw_csv=raw_csv,
                                 artifact_counts=artifact_counts,
                                 prompt_variant=prompt_variant,
+                                model_complexity=model_complexity,
                             )
                             n_csv_files += 1
                     finally:
@@ -595,6 +630,7 @@ class ExperimentEngine:
         raw_csv: Path,
         artifact_counts: Dict[str, int],
         prompt_variant: Dict[str, Any],
+        model_complexity: Dict[str, Any],
     ) -> None:
         prompt_variant_name = str(prompt_variant.get("name", "default"))
         experiment_type = (
@@ -809,6 +845,7 @@ class ExperimentEngine:
                         **path_fields,
                         **m,
                         **perf_fields,
+                        **model_complexity,
                     }
                     writer.writerow(row)
                     fh.flush()
@@ -1014,6 +1051,60 @@ class ExperimentEngine:
             ),
             "noisy_image_path": self._format_path(noisy_path),
             "noisy_image_source": noisy_source,
+        }
+
+    def _model_complexity_row_fields(
+        self,
+        *,
+        runner,
+        model_cfg: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        cfg = model_cfg or {}
+        total_params = _first_cfg_number(
+            cfg,
+            "params",
+            "total_params",
+            "num_params",
+            "n_params",
+            "parameters",
+        )
+        trainable_params = _first_cfg_number(
+            cfg,
+            "trainable_params",
+            "num_trainable_params",
+            "n_trainable_params",
+        )
+
+        model_obj = getattr(runner, "_model", None) or getattr(runner, "_predictor", None)
+        if model_obj is not None and not hasattr(model_obj, "parameters"):
+            model_obj = getattr(model_obj, "model", model_obj)
+        if model_obj is not None and hasattr(model_obj, "parameters"):
+            try:
+                total = 0
+                trainable = 0
+                for p in model_obj.parameters():
+                    n = int(p.numel())
+                    total += n
+                    if getattr(p, "requires_grad", False):
+                        trainable += n
+                total_params = float(total)
+                trainable_params = float(trainable)
+            except Exception:
+                pass
+
+        flops = _first_cfg_number(cfg, "FLOPs", "flops")
+        gflops = _first_cfg_number(cfg, "GFLOPs", "gflops", "GLOPs", "glops")
+        if np.isfinite(flops) and not np.isfinite(gflops):
+            gflops = flops / 1e9
+        if np.isfinite(gflops) and not np.isfinite(flops):
+            flops = gflops * 1e9
+
+        return {
+            "params": total_params,
+            "trainable_params": trainable_params,
+            "FLOPs": flops,
+            "GFLOPs": gflops,
+            "GLOPs": gflops,
         }
 
     def _release_runner(self, runner) -> None:

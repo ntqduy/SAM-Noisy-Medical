@@ -98,21 +98,41 @@ def _surface_distances(
     *,
     spacing: Optional[Sequence[float]] = None,
 ) -> Optional[np.ndarray]:
+    directed = _directed_surface_distances(pred, gt, spacing=spacing)
+    if directed is None:
+        return None
+    d_pred_to_gt, d_gt_to_pred = directed
+    return np.concatenate(
+        [d_pred_to_gt.astype(np.float64), d_gt_to_pred.astype(np.float64)],
+        axis=0,
+    )
+
+
+def _directed_surface_distances(
+    pred: np.ndarray,
+    gt: np.ndarray,
+    *,
+    spacing: Optional[Sequence[float]] = None,
+) -> Optional[Tuple[np.ndarray, np.ndarray]]:
     try:
         from scipy.ndimage import binary_erosion, distance_transform_edt
     except ImportError:
         return None
 
     p, g = _as_bool(pred), _as_bool(gt)
-    if g.sum() == 0:
-        return np.asarray([float("nan")], dtype=np.float64)
-    if p.sum() == 0:
-        return np.asarray([float("inf")], dtype=np.float64)
+    # Empty masks return NaN except the both-empty case, which is a perfect match.
+    if p.sum() == 0 and g.sum() == 0:
+        vals = np.asarray([0.0], dtype=np.float64)
+        return vals, vals
+    if p.sum() == 0 or g.sum() == 0:
+        vals = np.asarray([float("nan")], dtype=np.float64)
+        return vals, vals
 
     p_s = np.logical_xor(p, binary_erosion(p))
     g_s = np.logical_xor(g, binary_erosion(g))
     if not p_s.any() or not g_s.any():
-        return np.asarray([0.0], dtype=np.float64)
+        vals = np.asarray([0.0], dtype=np.float64)
+        return vals, vals
 
     sampling = _normalize_spacing(spacing, p_s.ndim)
     dt_p = distance_transform_edt(~p_s, sampling=sampling)
@@ -120,11 +140,9 @@ def _surface_distances(
     d_pred_to_gt = dt_g[p_s]
     d_gt_to_pred = dt_p[g_s]
     if d_pred_to_gt.size == 0 or d_gt_to_pred.size == 0:
-        return np.asarray([0.0], dtype=np.float64)
-    return np.concatenate(
-        [d_pred_to_gt.astype(np.float64), d_gt_to_pred.astype(np.float64)],
-        axis=0,
-    )
+        vals = np.asarray([0.0], dtype=np.float64)
+        return vals, vals
+    return d_pred_to_gt.astype(np.float64), d_gt_to_pred.astype(np.float64)
 
 
 def hausdorff_distance(
@@ -147,11 +165,14 @@ def hausdorff95_distance(
     *,
     spacing: Optional[Sequence[float]] = None,
 ) -> Optional[float]:
-    distances = _surface_distances(pred, gt, spacing=spacing)
-    if distances is None:
+    directed = _directed_surface_distances(pred, gt, spacing=spacing)
+    if directed is None:
         return None
+    d_pred_to_gt, d_gt_to_pred = directed
+    distances = np.concatenate([d_pred_to_gt, d_gt_to_pred], axis=0)
     if not np.isfinite(distances).all():
         return float(distances[0])
+    # HD95 uses pooled bidirectional surface distances.
     return float(np.percentile(distances, 95))
 
 
@@ -185,7 +206,7 @@ class MetricManager:
             "HD": hd_value,
         }
         if not keep_legacy_hd:
-            out["HD"] = hd_value
+            out.pop("HD", None)
 
         if add_hd95:
             hd95 = hausdorff95_distance(pred_mask, gt_mask)

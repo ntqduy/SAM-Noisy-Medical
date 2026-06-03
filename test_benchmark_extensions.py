@@ -17,6 +17,7 @@ from core.experiment_engine import (
     _build_processed_sample_key,
 )
 from analysis.aggregator import MetricAggregator
+from analysis.comprehensive_statistics import ComprehensiveStatistics
 from metrics.metric_manager import MetricManager
 from models.wrappers.prompt_utils import resolve_prompt_variant
 
@@ -43,6 +44,16 @@ def test_metrics() -> None:
     assert math.isfinite(out["HD95_px"])
     assert math.isnan(out["HD95_mm"])
 
+    no_legacy_hd = MetricManager.compute(
+        pred,
+        gt,
+        add_hd95=True,
+        keep_legacy_hd=False,
+    )
+    assert "HD" not in no_legacy_hd
+    assert "HD_px" in no_legacy_hd
+    assert "HD95_px" in no_legacy_hd
+
     out_mm = MetricManager.compute(
         pred,
         gt,
@@ -52,6 +63,35 @@ def test_metrics() -> None:
     )
     assert math.isfinite(out_mm["HD_mm"])
     assert math.isfinite(out_mm["HD95_mm"])
+
+    same = MetricManager.compute(gt, gt, add_hd95=True)
+    assert same["HD"] == 0.0
+    assert same["HD95_px"] == 0.0
+
+    empty = np.zeros_like(gt)
+    one_empty = MetricManager.compute(empty, gt, add_hd95=True)
+    assert math.isnan(one_empty["HD"])
+    assert math.isnan(one_empty["HD95_px"])
+
+    both_empty = MetricManager.compute(empty, empty, add_hd95=True)
+    assert both_empty["HD"] == 0.0
+    assert both_empty["HD95_px"] == 0.0
+
+    shifted_pred = np.zeros((8, 8), dtype=np.uint8)
+    shifted_gt = np.zeros_like(shifted_pred)
+    shifted_pred[3, 2] = 1
+    shifted_gt[2, 2] = 1
+    shifted = MetricManager.compute(
+        shifted_pred,
+        shifted_gt,
+        spacing=(2.0, 1.0),
+        add_hd95=True,
+        add_physical_distance=True,
+    )
+    assert shifted["HD_px"] == 1.0
+    assert shifted["HD95_px"] == 1.0
+    assert shifted["HD_mm"] == 2.0
+    assert shifted["HD95_mm"] == 2.0
 
 
 def test_prompt_variants() -> None:
@@ -219,6 +259,11 @@ def test_aggregate_fallback_and_variant_grouping() -> None:
                     "Precision",
                     "F1",
                     "HD",
+                    "params",
+                    "trainable_params",
+                    "FLOPs",
+                    "GFLOPs",
+                    "GLOPs",
                     "is_gt_empty",
                     "is_pred_empty",
                 ],
@@ -238,6 +283,11 @@ def test_aggregate_fallback_and_variant_grouping() -> None:
                 "Precision": 0.6,
                 "F1": 0.55,
                 "HD": 2.0,
+                "params": 1000,
+                "trainable_params": 100,
+                "FLOPs": 2000000000,
+                "GFLOPs": 2.0,
+                "GLOPs": 2.0,
                 "is_gt_empty": 0,
                 "is_pred_empty": 0,
             })
@@ -246,6 +296,16 @@ def test_aggregate_fallback_and_variant_grouping() -> None:
         assert stats.loc[0, "experiment_type"] == "main_prompt_mode_benchmark"
         assert stats.loc[0, "prompt_variant"] == "default"
         assert stats.loc[0, "failure_rate_dice_lt_0_5"] == 1.0
+        assert stats.loc[0, "params"] == 1000
+        assert stats.loc[0, "GFLOPs"] == 2.0
+
+        stats_csv = Path(td) / "statistics_merged.csv"
+        stats.to_csv(stats_csv, index=False)
+        comprehensive = ComprehensiveStatistics(stats_csv, Path(td) / "statistics")
+        profile = comprehensive.model_profile_summary()
+        assert profile.loc[0, "params"] == 1000
+        model_summary = comprehensive.model_summary()
+        assert "GFLOPs" in model_summary.columns
 
         variant_raw = Path(td) / "variant_raw.csv"
         with variant_raw.open("w", newline="", encoding="utf-8") as fh:
