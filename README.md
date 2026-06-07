@@ -151,6 +151,8 @@ Prompt variant statistics are grouped by:
 
 dataset, model, prompt_mode, prompt_variant, noise_type, noise_level
 
+Prompt variant summary/comparison tables also include filtered main-run defaults as `bbox_default` and `point_default` when matching variant coverage exists. The defaults are matched by dataset, model, prompt mode, noise type, and noise level, so partial variant runs do not pull in unrelated full-benchmark levels.
+
 For each metric, aggregate stage reports:
 
 - mean

@@ -9,6 +9,7 @@ import tempfile
 from pathlib import Path
 
 import numpy as np
+import pandas as pd
 from PIL import Image
 
 from core.experiment_engine import (
@@ -347,10 +348,92 @@ def test_aggregate_fallback_and_variant_grouping() -> None:
         assert set(variant_stats["prompt_variant"]) == {"bbox_gt_5", "bbox_expand_10"}
 
 
+def test_prompt_variant_summary_adds_filtered_defaults() -> None:
+    with tempfile.TemporaryDirectory() as td:
+        stats_csv = Path(td) / "statistics_merged.csv"
+        rows = [
+            {
+                "experiment_type": "main_prompt_mode_benchmark",
+                "dataset": "BUSI",
+                "model": "SAM2",
+                "prompt_mode": "prompt_bbox",
+                "prompt_variant": "default",
+                "noise_type": "gaussian",
+                "noise_level": "L1",
+                "Dice": 0.90,
+            },
+            {
+                "experiment_type": "main_prompt_mode_benchmark",
+                "dataset": "BUSI",
+                "model": "SAM2",
+                "prompt_mode": "prompt_bbox",
+                "prompt_variant": "default",
+                "noise_type": "gaussian",
+                "noise_level": "L2",
+                "Dice": 0.10,
+            },
+            {
+                "experiment_type": "main_prompt_mode_benchmark",
+                "dataset": "BUSI",
+                "model": "SAM2",
+                "prompt_mode": "prompt_point",
+                "prompt_variant": "default",
+                "noise_type": "gaussian",
+                "noise_level": "L1",
+                "Dice": 0.85,
+            },
+            {
+                "experiment_type": "main_prompt_mode_benchmark",
+                "dataset": "BUSI",
+                "model": "SAM2",
+                "prompt_mode": "prompt_point",
+                "prompt_variant": "default",
+                "noise_type": "gaussian",
+                "noise_level": "L2",
+                "Dice": 0.15,
+            },
+            {
+                "experiment_type": "prompt_variant_benchmark",
+                "dataset": "BUSI",
+                "model": "SAM2",
+                "prompt_mode": "prompt_bbox",
+                "prompt_variant": "bbox_expand_10",
+                "noise_type": "gaussian",
+                "noise_level": "L1",
+                "Dice": 0.70,
+            },
+            {
+                "experiment_type": "prompt_variant_benchmark",
+                "dataset": "BUSI",
+                "model": "SAM2",
+                "prompt_mode": "prompt_point",
+                "prompt_variant": "point_centroid",
+                "noise_type": "gaussian",
+                "noise_level": "L1",
+                "Dice": 0.60,
+            },
+        ]
+        pd.DataFrame(rows).to_csv(stats_csv, index=False)
+
+        comprehensive = ComprehensiveStatistics(stats_csv, Path(td) / "statistics")
+        summary = comprehensive.prompt_variant_summary()
+        observed = set(zip(summary["prompt_mode"], summary["prompt_variant"], summary["noise_level"]))
+        assert ("prompt_bbox", "bbox_default", "L1") in observed
+        assert ("prompt_point", "point_default", "L1") in observed
+        assert ("prompt_bbox", "bbox_default", "L2") not in observed
+        assert ("prompt_point", "point_default", "L2") not in observed
+
+        comparison = comprehensive.prompt_variant_comparison()
+        labels = set(comparison["prompt_variant_comparison"])
+        assert "prompt_bbox:bbox_default" in labels
+        assert "prompt_point:point_default" in labels
+
+
 if __name__ == "__main__":
     test_metrics()
     test_prompt_variants()
     test_resume_key_and_paths()
     test_reuse_noisy_image()
     test_aggregate_fallback_and_variant_grouping()
+    test_prompt_variant_summary_adds_filtered_defaults()
     print("benchmark extension smoke tests passed")

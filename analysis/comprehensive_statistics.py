@@ -51,6 +51,17 @@ METRICS = [
     "FPS",
 ]
 GROUP_KEYS = ["dataset", "model", "prompt_mode", "noise_type", "noise_level"]
+PROMPT_VARIANT_COVERAGE_KEYS = [
+    "dataset",
+    "model",
+    "prompt_mode",
+    "noise_type",
+    "noise_level",
+]
+DEFAULT_PROMPT_VARIANT_LABELS = {
+    "prompt_bbox": "bbox_default",
+    "prompt_point": "point_default",
+}
 MODEL_COMPLEXITY_COLUMNS = [
     "params",
     "trainable_params",
@@ -723,8 +734,70 @@ class ComprehensiveStatistics:
             ["dataset", "model", "prompt_mode", "noise_type", "noise_level"],
         )
 
+    def _prompt_variant_rows_with_defaults(self) -> pd.DataFrame:
+        variant_df = self.df[self.df["experiment_type"] == "prompt_variant_benchmark"].copy()
+        if variant_df.empty:
+            return variant_df
+
+        default_parts = []
+        main_df = self.df[self.df["experiment_type"] == "main_prompt_mode_benchmark"].copy()
+        if main_df.empty:
+            return variant_df
+
+        for prompt_mode, default_label in DEFAULT_PROMPT_VARIANT_LABELS.items():
+            mode_variants = variant_df[variant_df["prompt_mode"] == prompt_mode].copy()
+            if mode_variants.empty:
+                continue
+
+            coverage = mode_variants[PROMPT_VARIANT_COVERAGE_KEYS].drop_duplicates()
+            mode_defaults = main_df[main_df["prompt_mode"] == prompt_mode].copy()
+            if mode_defaults.empty:
+                continue
+
+            mode_defaults = mode_defaults.merge(
+                coverage.assign(__variant_coverage=1),
+                on=PROMPT_VARIANT_COVERAGE_KEYS,
+                how="inner",
+            ).drop(columns=["__variant_coverage"])
+            if mode_defaults.empty:
+                continue
+
+            existing_default_keys = mode_variants.loc[
+                mode_variants["prompt_variant"] == default_label,
+                PROMPT_VARIANT_COVERAGE_KEYS,
+            ].drop_duplicates()
+            if not existing_default_keys.empty:
+                mode_defaults = mode_defaults.merge(
+                    existing_default_keys.assign(__already_present=1),
+                    on=PROMPT_VARIANT_COVERAGE_KEYS,
+                    how="left",
+                )
+                mode_defaults = mode_defaults[
+                    mode_defaults["__already_present"].isna()
+                ].drop(columns=["__already_present"])
+            if mode_defaults.empty:
+                continue
+
+            mode_defaults["experiment_type"] = "prompt_variant_benchmark"
+            mode_defaults["prompt_variant"] = default_label
+            if "bbox_variant" in mode_defaults.columns:
+                mode_defaults["bbox_variant"] = (
+                    default_label if prompt_mode == "prompt_bbox" else "none"
+                )
+            if "point_variant" in mode_defaults.columns:
+                mode_defaults["point_variant"] = (
+                    default_label if prompt_mode == "prompt_point" else "none"
+                )
+            if "prompt_source" in mode_defaults.columns:
+                mode_defaults["prompt_source"] = "main_prompt_mode_default"
+            default_parts.append(mode_defaults)
+
+        if not default_parts:
+            return variant_df
+        return pd.concat([variant_df, *default_parts], ignore_index=True, sort=False)
+
     def prompt_variant_summary(self) -> pd.DataFrame:
-        df = self.df[self.df["experiment_type"] == "prompt_variant_benchmark"].copy()
+        df = self._prompt_variant_rows_with_defaults()
         return self._benchmark_summary(
             df,
             ["dataset", "model", "prompt_mode", "prompt_variant", "noise_type", "noise_level"],
